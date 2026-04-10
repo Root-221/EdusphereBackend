@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// MODULE 0: Authentification & Utilisateurs
+model School {
+  id                     String       @id @default(cuid())
+  name                   String
+  slug                   String       @unique
+  databaseUrl            String
+  type                   SchoolType
+  status                 SchoolStatus @default(PENDING)
+  plan                   String       @default("free")
+  email                  String       @unique
+  phone                  String?
+  city                   String?
+  country                String?
+  address                String?
+  description            String?
+  logo                   String?
+  brandingColor          String?
+  brandingSecondaryColor String?
+  brandingSlogan         String?
+
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  @@index([slug])
+  @@index([status])
+}
+
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique
+  passwordHash     String
+  firstName        String
+  lastName         String
+  role             UserRole
+  avatar           String?
+  phone            String?
+  isActive         Boolean   @default(true)
+  emailVerified    Boolean   @default(false)
+  
+  // Sécurité
+  lastLoginAt      DateTime?
+  failedLoginAttempts Int @default(0)
+  lockedUntil      DateTime?
+  passwordChangedAt DateTime @default(now())
+  
+  // Sessions & 2FA
+  sessions         Session[]
+  totpSecret       String?
+  totpEnabled      Boolean   @default(false)
+  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model Session {
+  id            String    @id @default(cuid())
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token         String    @unique
+  refreshToken  String    @unique
+  userAgent     String?
+  ipAddress     String?
+  expiresAt     DateTime
+  
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  SCHOOL_ADMIN
+  TEACHER
+  STUDENT
+  PARENT
+  ACCOUNTANT
+}
+
+enum SchoolType {
+  PUBLIC
+  PRIVATE
+  COLLEGE
+  LYCEE
+  UNIVERSITY
+  INSTITUTE
+  CORANIC
+}
+
+enum SchoolStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+}
