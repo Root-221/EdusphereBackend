@@ -1,67 +1,96 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import axios, { AxiosInstance } from 'axios';
-
-interface EmailAddress {
-  email: string;
-  name?: string;
-}
+import * as nodemailer from 'nodemailer';
 
 interface EmailPayload {
-  to: EmailAddress[];
+  to: Array<{ email: string; name?: string }>;
   subject: string;
   html: string;
   text?: string;
 }
 
+interface EmailSendResult {
+  success: boolean;
+  error?: string;
+}
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-  private readonly mode: 'console' | 'twilio';
-  private readonly client?: AxiosInstance;
-  private readonly from: EmailAddress;
+  private readonly mode: 'console' | 'smtp';
+  private transporter?: nodemailer.Transporter;
+  private readonly fromName: string;
+  private readonly fromEmail: string;
 
   constructor(private readonly config: ConfigService) {
-    const apiKey = this.config.get<string>('TWILIO_SENDGRID_API_KEY');
-    this.mode = apiKey ? 'twilio' : 'console';
-    this.from = this.parseAddress(
-      this.config.get<string>('TWILIO_EMAIL_FROM') ?? 'EduSphere <noreply@edusphere.com>',
-    );
+    const smtpHost = this.config.get<string>('SMTP_HOST');
+    const smtpPortStr = this.config.get<string>('SMTP_PORT');
+    const smtpUser = this.config.get<string>('SMTP_USERNAME');
+    const smtpPass = this.config.get<string>('SMTP_PASSWORD');
+    const smtpPort = smtpPortStr ? parseInt(smtpPortStr, 10) : 587;
 
-    if (this.mode === 'twilio') {
-      this.client = axios.create({
-        baseURL: 'https://api.sendgrid.com/v3',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 15000,
-      });
+    if (smtpHost && smtpUser && smtpPass) {
+      this.mode = 'smtp';
+      this.fromName = this.config.get<string>('MAIL_FROM_NAME') ?? 'EduSphere';
+      this.fromEmail = smtpUser;
+
+      try {
+        this.transporter = nodemailer.createTransport({
+          host: smtpHost,
+          port: smtpPort,
+          secure: smtpPort === 465,
+          auth: {
+            user: smtpUser,
+            pass: smtpPass,
+          },
+          connectionTimeout: this.getTimeout('SMTP_CONNECTION_TIMEOUT', 10000),
+          timeout: this.getTimeout('SMTP_TIMEOUT', 10000),
+          socketTimeout: this.getTimeout('SMTP_WRITE_TIMEOUT', 10000),
+          tls: {
+            rejectUnauthorized: false,
+          },
+        });
+        this.logger.log('SMTP transporter initialized successfully');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Failed to initialize SMTP transporter: ${message}`);
+        this.mode = 'console';
+        this.transporter = undefined;
+      }
+    } else {
+      this.mode = 'console';
+      this.fromName = this.config.get<string>('MAIL_FROM_NAME') ?? 'EduSphere';
+      this.fromEmail = 'noreply@edusphere.com';
     }
   }
 
-  async send(payload: EmailPayload) {
-    if (this.mode === 'console') {
+  async send(payload: EmailPayload): Promise<EmailSendResult> {
+    if (this.mode === 'console' || !this.transporter) {
       this.logger.debug('Email (console mode):', {
-        from: this.from,
-        ...payload,
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to: payload.to.map((to) => to.email).join(', '),
+        subject: payload.subject,
       });
-      return;
+      return { success: true };
     }
 
-    if (!this.client) {
-      throw new Error('Twilio email client is not initialized');
-    }
+    try {
+      const mailOptions = {
+        from: `${this.fromName} <${this.fromEmail}>`,
+        to: payload.to.map((to) => to.email).join(', '),
+        subject: payload.subject,
+        html: payload.html,
+        text: payload.text,
+      };
 
-    await this.client.post('/mail/send', {
-      personalizations: [{ to: payload.to }],
-      from: this.from,
-      subject: payload.subject,
-      content: [
-        { type: 'text/html', value: payload.html },
-        ...(payload.text ? [{ type: 'text/plain', value: payload.text }] : []),
-      ],
-    });
+      await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Email sent to ${payload.to.map((to) => to.email).join(', ')}`);
+      return { success: true };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Email send failed: ${message}`);
+      return { success: false, error: message };
+    }
   }
 
   async sendTenantAdminInvitation(params: {
@@ -71,7 +100,7 @@ export class EmailService {
     tenantSlug: string;
     login: string;
     password: string;
-  }) {
+  }): Promise<EmailSendResult> {
     const tenantUrl = this.buildTenantUrl(params.tenantSlug);
     const subject = `${params.schoolName} • Accès EduSphere`;
     const html = `
@@ -93,12 +122,12 @@ URL : ${tenantUrl}
 Login : ${params.login}
 Mot de passe temporaire : ${params.password}
 
-Changez votre mot de passe après la première connexion.
+Pour des raisons de sécurité, changez votre mot de passe après la première connexion.
 
 À bientôt,
 L'équipe EduSphere`;
 
-    await this.send({
+    return await this.send({
       to: [{ email: params.to, name: params.firstName }],
       subject,
       html,
@@ -121,7 +150,7 @@ L'équipe EduSphere`;
     academicYear: string;
     semester: string;
     className: string;
-  }) {
+  }): Promise<EmailSendResult> {
     const tenantUrl = this.buildTenantUrl(params.tenantSlug);
     const subject = `${params.schoolName} • Compte ${params.accountLabel}`;
     const html = `
@@ -157,12 +186,12 @@ Année : ${params.academicYear}
 Semestre : ${params.semester}
 Classe : ${params.className}
 
-Changez votre mot de passe après la première connexion.
+Pour des raisons de sécurité, changez votre mot de passe après la première connexion.
 
 À bientôt,
 L'équipe EduSphere`;
 
-    await this.send({
+    return await this.send({
       to: [{ email: params.to, name: params.firstName }],
       subject,
       html,
@@ -170,12 +199,14 @@ L'équipe EduSphere`;
     });
   }
 
-  private parseAddress(value: string): EmailAddress {
-    const match = value.match(/^(.*)<(.+@.+)>$/);
-    if (match) {
-      return { name: match[1].trim(), email: match[2].trim() };
+  private getTimeout(key: string, fallback: number): number {
+    const rawValue = this.config.get<string>(key);
+    if (!rawValue) {
+      return fallback;
     }
-    return { email: value.trim() };
+
+    const parsed = Number.parseInt(rawValue, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
   }
 
   private buildTenantUrl(slug: string): string {

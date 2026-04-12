@@ -66,7 +66,7 @@ async function ensureDatabase(dbName: string, adminUrl: string) {
 async function pushTenantSchema(databaseUrl: string) {
   const result = spawnSync(
     'npx',
-    ['prisma', 'db', 'push', '--schema', TENANT_SCHEMA_PATH, '--accept-data-loss'],
+    ['prisma', 'db', 'push', '--schema', TENANT_SCHEMA_PATH, '--skip-generate', '--accept-data-loss'],
     {
       cwd: process.cwd(),
       env: {

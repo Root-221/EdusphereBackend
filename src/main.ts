@@ -9,6 +9,8 @@ import { join } from 'node:path';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: true });
+  const port = Number(process.env.PORT || 3000);
+  const host = '127.0.0.1';
   
   app.useStaticAssets(join(process.cwd(), 'uploads'), {
     prefix: '/uploads',
@@ -40,7 +42,7 @@ async function bootstrap() {
     .setTitle('EduSphere Central API')
     .setDescription('API centrale Edusphere - Gestion écoles/lycées, emplois du temps, notes, paiements...\n\n**Seed users (Password123!):**\n• superadmin@edusphere.sn (SUPER_ADMIN)\n• admin@lycee-excellence.sn (SCHOOL_ADMIN)\n• teacher/student/parent/comptable@lycee-excellence.sn')
     .setVersion('1.0')
-    .addServer('http://localhost:3000', 'Development')
+    .addServer(`http://localhost:${port}`, 'Development')
     .addServer('https://api.edusphere.sn', 'Production')
     .addBearerAuth({
       description: `JWT Bearer auth.\nEx: POST /api/v1/auth/login → {"email": "superadmin@edusphere.sn", "password": "Password123!"}`,
@@ -54,13 +56,14 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api-docs', app, document);
 
-  await app.listen(process.env.PORT || 3000);
+  await app.listen(port, host);
   
-  console.log('🚀 Backend running on http://localhost:3000');
-  console.log('📚 API: http://localhost:3000/api/v1');
-  console.log('🔍 Health: http://localhost:3000/api/v1/health');
-  console.log('🔐 Login: http://localhost:3000/api/v1/auth/login');
-  console.log('📖 Swagger: http://localhost:3000/api-docs');
+  const baseUrl = `http://localhost:${port}`;
+  console.log(`🚀 Backend running on ${baseUrl}`);
+  console.log(`📚 API: ${baseUrl}/api/v1`);
+  console.log(`🔍 Health: ${baseUrl}/api/v1/health`);
+  console.log(`🔐 Login: ${baseUrl}/api/v1/auth/login`);
+  console.log(`📖 Swagger: ${baseUrl}/api-docs`);
 }
 
 bootstrap();

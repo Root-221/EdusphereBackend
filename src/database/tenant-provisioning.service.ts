@@ -41,7 +41,15 @@ export class TenantProvisioningService implements OnModuleInit, OnModuleDestroy 
   }
 
   async onModuleInit() {
-    await this.adminClient.$connect();
+    try {
+      await this.adminClient.$connect();
+      this.logger.log('Tenant provisioning admin client connected');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `Central admin database is not reachable at bootstrap (${message}). Tenant provisioning will retry on demand.`,
+      );
+    }
   }
 
   async onModuleDestroy() {
@@ -184,6 +192,7 @@ export class TenantProvisioningService implements OnModuleInit, OnModuleDestroy 
             'push',
             '--schema',
             this.schemaPath,
+            '--skip-generate',
             '--accept-data-loss',
           ],
           {

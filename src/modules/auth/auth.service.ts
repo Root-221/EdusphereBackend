@@ -164,7 +164,7 @@ async login(loginDto: LoginDto, ipAddress: string, tenant: ITenant | null): Prom
     });
 
     try {
-      await this.emailService.sendTenantAdminInvitation({
+      const emailResult = await this.emailService.sendTenantAdminInvitation({
         to: adminEmail,
         firstName: dto.adminFirstName,
         schoolName: dto.name,
@@ -172,8 +172,20 @@ async login(loginDto: LoginDto, ipAddress: string, tenant: ITenant | null): Prom
         login: adminEmail,
         password: adminTempPassword,
       });
+
+      if (emailResult.success) {
+        this.logger.log(`School admin invitation email queued for ${adminEmail}`);
+      } else {
+        this.logger.warn(
+          `School created, but the invitation email could not be sent to ${adminEmail}: ${emailResult.error ?? 'unknown error'}`,
+        );
+      }
     } catch (error) {
-      this.logger.warn('Failed to send school admin invite', error as Error);
+      this.logger.warn(
+        `School created, but email delivery threw an unexpected error for ${adminEmail}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     }
 
     return result;

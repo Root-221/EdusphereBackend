@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '@database/prisma.service';
 import { User, School, Session, UserRole, SchoolStatus } from '@prisma/client';
 import { TenantDatabaseService } from '@database/tenant-database.service';
@@ -138,7 +138,14 @@ export class AuthRepository {
     school: School;
     admin: User;
   }> {
-    const databaseUrl = await this.tenantProvisioningService.ensureTenantDatabase(data.slug);
+    let databaseUrl: string;
+    try {
+      databaseUrl = await this.tenantProvisioningService.ensureTenantDatabase(data.slug);
+    } catch {
+      throw new ServiceUnavailableException(
+        'Impossible de provisionner la base du tenant. Verifie que PostgreSQL est disponible et que le compte dispose du droit de creation de bases.',
+      );
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const schoolData = {
