@@ -55,8 +55,12 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       select: {
         id: true,
         email: true,
+        firstName: true,
+        lastName: true,
+        avatar: true,
         role: true,
         isActive: true,
+        mustChangePassword: true,
       },
     });
 
@@ -72,8 +76,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       id: user.id,
       sub: user.id,
       email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      avatar: user.avatar ?? null,
       role: user.role,
       schoolId: payload.schoolId ?? null,
+      schoolName: tenant?.name ?? null,
+      mustChangePassword: user.mustChangePassword,
     };
   }
 }

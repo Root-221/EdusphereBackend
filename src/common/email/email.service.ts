@@ -102,30 +102,26 @@ export class EmailService {
     password: string;
   }): Promise<EmailSendResult> {
     const tenantUrl = this.buildTenantUrl(params.tenantSlug);
-    const subject = `${params.schoolName} • Accès EduSphere`;
-    const html = `
-      <p>Bonjour ${params.firstName ?? 'Administrateur'},</p>
-      <p>Votre compte EduSphere pour <strong>${params.schoolName}</strong> vient d'être créé.</p>
-      <ul>
-        <li><strong>URL :</strong> <a href="${tenantUrl}">${tenantUrl}</a></li>
-        <li><strong>Login :</strong> ${params.login}</li>
-        <li><strong>Mot de passe temporaire :</strong> ${params.password}</li>
-      </ul>
-      <p>Pour des raisons de sécurité, changez votre mot de passe après la première connexion.</p>
-      <p>À bientôt,<br/>L'équipe EduSphere</p>
-    `;
-    const text = `Bonjour ${params.firstName ?? 'Administrateur'},
-
-Votre compte EduSphere pour ${params.schoolName} vient d'être créé.
-
-URL : ${tenantUrl}
-Login : ${params.login}
-Mot de passe temporaire : ${params.password}
-
-Pour des raisons de sécurité, changez votre mot de passe après la première connexion.
-
-À bientôt,
-L'équipe EduSphere`;
+    const recipientName = params.firstName?.trim() || 'Administrateur';
+    const subject = `${params.schoolName} • Accès administrateur EduSphere`;
+    const { html, text } = this.buildStyledCredentialEmail({
+      preheader: `Votre espace administrateur ${params.schoolName} est prêt`,
+      banner: 'Accès administrateur',
+      title: `Bienvenue dans ${params.schoolName}`,
+      greeting: `Bonjour ${recipientName},`,
+      intro:
+        'Votre espace administrateur EduSphere a été créé. Voici les informations à utiliser pour votre première connexion.',
+      ctaLabel: 'Ouvrir l’espace administrateur',
+      ctaUrl: tenantUrl,
+      rows: [
+        { label: 'École', value: params.schoolName },
+        { label: 'URL de connexion', value: tenantUrl },
+        { label: 'Login', value: params.login },
+        { label: 'Mot de passe temporaire', value: params.password },
+      ],
+      note:
+        'Pour votre sécurité, changez votre mot de passe dès la première connexion.',
+    });
 
     return await this.send({
       to: [{ email: params.to, name: params.firstName }],
@@ -152,44 +148,72 @@ L'équipe EduSphere`;
     className: string;
   }): Promise<EmailSendResult> {
     const tenantUrl = this.buildTenantUrl(params.tenantSlug);
+    const recipientName = params.firstName?.trim() || 'Utilisateur';
     const subject = `${params.schoolName} • Compte ${params.accountLabel}`;
-    const html = `
-      <p>Bonjour ${params.firstName ?? 'Utilisateur'},</p>
-      <p>Votre compte ${params.accountLabel} a été créé pour <strong>${params.schoolName}</strong>.</p>
-      <ul>
-        <li><strong>URL :</strong> <a href="${tenantUrl}">${tenantUrl}</a></li>
-        <li><strong>Login :</strong> ${params.login}</li>
-        <li><strong>Mot de passe temporaire :</strong> ${params.password}</li>
-        <li><strong>Matricule :</strong> ${params.matricule}</li>
-        <li><strong>Inscription :</strong> ${params.enrollmentNumber}</li>
-        <li><strong>Reçu :</strong> ${params.receiptNumber}</li>
-        <li><strong>Montant payé :</strong> ${params.amount.toLocaleString()} CFA</li>
-        <li><strong>Année :</strong> ${params.academicYear}</li>
-        <li><strong>Semestre :</strong> ${params.semester}</li>
-        <li><strong>Classe :</strong> ${params.className}</li>
-      </ul>
-      <p>Pour des raisons de sécurité, changez votre mot de passe après la première connexion.</p>
-      <p>À bientôt,<br/>L'équipe EduSphere</p>
-    `;
-    const text = `Bonjour ${params.firstName ?? 'Utilisateur'},
+    const { html, text } = this.buildStyledCredentialEmail({
+      preheader: `Vos accès ${params.accountLabel} pour ${params.schoolName} sont prêts`,
+      banner: `Compte ${params.accountLabel}`,
+      title: 'Bienvenue sur EduSphere',
+      greeting: `Bonjour ${recipientName},`,
+      intro:
+        `Votre compte ${params.accountLabel} a été créé pour ${params.schoolName}. Vous trouverez ci-dessous les informations de connexion et les détails de votre inscription.`,
+      ctaLabel: `Accéder à ${params.schoolName}`,
+      ctaUrl: tenantUrl,
+      rows: [
+        { label: 'École', value: params.schoolName },
+        { label: 'URL de connexion', value: tenantUrl },
+        { label: 'Login', value: params.login },
+        { label: 'Mot de passe temporaire', value: params.password },
+        { label: 'Matricule', value: params.matricule },
+        { label: 'Numéro d’inscription', value: params.enrollmentNumber },
+        { label: 'Reçu', value: params.receiptNumber },
+        { label: 'Montant payé', value: `${params.amount.toLocaleString('fr-FR')} CFA` },
+        { label: 'Année scolaire', value: params.academicYear },
+        { label: 'Semestre', value: params.semester },
+        { label: 'Classe', value: params.className },
+      ],
+      note:
+        'Le mot de passe reçu ici est temporaire. La première connexion affichera une demande de changement de mot de passe.',
+    });
 
-Votre compte ${params.accountLabel} a été créé pour ${params.schoolName}.
+    return await this.send({
+      to: [{ email: params.to, name: params.firstName }],
+      subject,
+      html,
+      text,
+    });
+  }
 
-URL : ${tenantUrl}
-Login : ${params.login}
-Mot de passe temporaire : ${params.password}
-Matricule : ${params.matricule}
-Inscription : ${params.enrollmentNumber}
-Reçu : ${params.receiptNumber}
-Montant payé : ${params.amount.toLocaleString()} CFA
-Année : ${params.academicYear}
-Semestre : ${params.semester}
-Classe : ${params.className}
-
-Pour des raisons de sécurité, changez votre mot de passe après la première connexion.
-
-À bientôt,
-L'équipe EduSphere`;
+  async sendUserInvitation(params: {
+    to: string;
+    firstName?: string;
+    schoolName: string;
+    tenantSlug: string;
+    login: string;
+    password: string;
+    accountLabel: string;
+  }): Promise<EmailSendResult> {
+    const tenantUrl = this.buildTenantUrl(params.tenantSlug);
+    const recipientName = params.firstName?.trim() || 'Utilisateur';
+    const accountLabel = params.accountLabel?.trim() || 'utilisateur';
+    const subject = `${params.schoolName} • Acces ${accountLabel} EduSphere`;
+    const { html, text } = this.buildStyledCredentialEmail({
+      preheader: `Vos acces ${accountLabel} pour ${params.schoolName} sont prets`,
+      banner: `Compte ${accountLabel}`,
+      title: 'Bienvenue sur EduSphere',
+      greeting: `Bonjour ${recipientName},`,
+      intro: `Votre compte ${accountLabel} a ete cree pour ${params.schoolName}. Voici vos informations de connexion.`,
+      ctaLabel: 'Se connecter',
+      ctaUrl: tenantUrl,
+      rows: [
+        { label: 'Ecole', value: params.schoolName },
+        { label: 'URL de connexion', value: tenantUrl },
+        { label: 'Login', value: params.login },
+        { label: 'Mot de passe temporaire', value: params.password },
+      ],
+      note:
+        'Le mot de passe recu ici est temporaire. La premiere connexion affichera une demande de changement de mot de passe.',
+    });
 
     return await this.send({
       to: [{ email: params.to, name: params.firstName }],
@@ -225,5 +249,123 @@ L'équipe EduSphere`;
     }
 
     return `${scheme}://${slug}.localhost`;
+  }
+
+  private buildStyledCredentialEmail(params: {
+    preheader: string;
+    banner: string;
+    title: string;
+    greeting: string;
+    intro: string;
+    ctaLabel: string;
+    ctaUrl: string;
+    rows: Array<{ label: string; value: string }>;
+    note: string;
+  }): { html: string; text: string } {
+    const rowsHtml = params.rows
+      .map(
+        (row) => `
+          <tr>
+            <td style="padding:0 0 12px 0;">
+              <div style="border:1px solid #e2e8f0; background:#f8fafc; border-radius:16px; padding:14px 16px;">
+                <div style="font-size:11px; line-height:1; letter-spacing:0.12em; text-transform:uppercase; color:#64748b; margin-bottom:6px;">
+                  ${this.escapeHtml(row.label)}
+                </div>
+                <div style="font-size:15px; line-height:1.5; color:#0f172a; font-weight:600; word-break:break-word;">
+                  ${this.escapeHtml(row.value)}
+                </div>
+              </div>
+            </td>
+          </tr>`,
+      )
+      .join('');
+
+    const html = `
+      <div style="margin:0; padding:0; background:#f4f7fb;">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse; background:#f4f7fb; width:100%;">
+          <tr>
+            <td align="center" style="padding:32px 16px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse; max-width:680px; font-family:Arial,Helvetica,sans-serif;">
+                <tr>
+                  <td style="padding-bottom:14px; text-align:center; color:#64748b; font-size:12px; letter-spacing:0.12em; text-transform:uppercase;">
+                    ${this.escapeHtml(params.preheader)}
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background:#1d4ed8; background-image:linear-gradient(135deg, #1d4ed8 0%, #2563eb 52%, #0f766e 100%); border-radius:24px 24px 0 0; padding:34px 32px;">
+                    <div style="display:inline-block; background:rgba(255,255,255,0.16); border:1px solid rgba(255,255,255,0.18); color:#ffffff; font-size:12px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:8px 12px; border-radius:999px;">
+                      ${this.escapeHtml(params.banner)}
+                    </div>
+                    <h1 style="margin:18px 0 10px; font-size:30px; line-height:1.2; color:#ffffff;">
+                      ${this.escapeHtml(params.title)}
+                    </h1>
+                    <p style="margin:0; font-size:16px; line-height:1.7; color:rgba(255,255,255,0.92);">
+                      ${this.escapeHtml(params.intro)}
+                    </p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background:#ffffff; border-left:1px solid #e2e8f0; border-right:1px solid #e2e8f0; padding:32px;">
+                    <p style="margin:0 0 20px; font-size:16px; line-height:1.7; color:#0f172a;">
+                      ${this.escapeHtml(params.greeting)}
+                    </p>
+                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse; margin:0 0 8px;">
+                      ${rowsHtml}
+                    </table>
+                    <div style="padding:8px 0 0; text-align:center;">
+                      <a href="${this.escapeHtml(params.ctaUrl)}" style="display:inline-block; background:#1d4ed8; color:#ffffff; text-decoration:none; font-size:14px; font-weight:700; padding:14px 24px; border-radius:14px; box-shadow:0 10px 24px rgba(29,78,216,0.22);">
+                        ${this.escapeHtml(params.ctaLabel)}
+                      </a>
+                    </div>
+                    <p style="margin:14px 0 0; text-align:center; font-size:12px; line-height:1.6; color:#64748b;">
+                      ${this.escapeHtml(`Connexion : ${params.ctaUrl}`)}
+                    </p>
+                    <div style="margin-top:24px; border-left:4px solid #1d4ed8; background:#eff6ff; padding:14px 16px; border-radius:14px;">
+                      <p style="margin:0; font-size:14px; line-height:1.7; color:#1e3a8a;">
+                        ${this.escapeHtml(params.note)}
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="background:#f8fafc; border:1px solid #e2e8f0; border-top:none; border-radius:0 0 24px 24px; padding:20px 32px; text-align:center;">
+                    <p style="margin:0; font-size:13px; line-height:1.6; color:#64748b;">
+                      L'équipe EduSphere
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </div>
+    `;
+
+    const text = [
+      params.preheader,
+      '',
+      params.greeting,
+      '',
+      params.intro,
+      '',
+      ...params.rows.map((row) => `${row.label} : ${row.value}`),
+      '',
+      params.note,
+      '',
+      `Connexion : ${params.ctaUrl}`,
+      '',
+      "L'équipe EduSphere",
+    ].join('\n');
+
+    return { html, text };
+  }
+
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 }

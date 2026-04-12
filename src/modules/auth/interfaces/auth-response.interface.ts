@@ -6,7 +6,10 @@ export interface AuthResponse {
     email: string;
     firstName: string;
     lastName: string;
+    avatar?: string | null;
     role: string;
     schoolId: string | null;
+    schoolName: string | null;
+    mustChangePassword: boolean;
   };
 }

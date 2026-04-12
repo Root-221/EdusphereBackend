@@ -4,7 +4,7 @@ import {
   OnModuleDestroy,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { PrismaClient } from '@prisma/tenant-client';
+import { PrismaClient } from '@prisma/tenant-client-generated';
 import { ITenant } from '@common/interfaces/tenant.interface';
 
 @Injectable()

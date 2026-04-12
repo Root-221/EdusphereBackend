@@ -570,6 +570,44 @@ export class AcademicService {
     }));
   }
 
+  async listClassTeachers(tenant: ITenant | null, classId: string): Promise<any[]> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    const schoolClass = await this.requireClass(client, schoolId, classId);
+    const classLabel = schoolClass.level?.name
+      ? `${schoolClass.level.name} - ${schoolClass.name}`
+      : schoolClass.name;
+
+    const links = await client.teacherClass.findMany({
+      where: { schoolId, classId },
+      include: {
+        teacher: {
+          include: {
+            user: true,
+            primarySubject: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return links
+      .map((link: any) => link.teacher)
+      .filter(Boolean)
+      .map((teacher: any) => ({
+        id: teacher.userId,
+        firstName: teacher.user?.firstName ?? '',
+        name: teacher.user?.lastName ?? '',
+        email: teacher.user?.email ?? '',
+        phone: teacher.user?.phone ?? '',
+        subject: teacher.primarySubject?.name ?? '',
+        subjectId: teacher.primarySubjectId ?? '',
+        classIds: [classId],
+        classNames: [classLabel],
+        status: teacher.user?.isActive ? 'active' : 'inactive',
+      }));
+  }
+
   async createClass(tenant: ITenant | null, dto: CreateClassDto): Promise<any> {
     const client = await this.getClient(tenant);
     const schoolId = this.requireTenant(tenant).id;

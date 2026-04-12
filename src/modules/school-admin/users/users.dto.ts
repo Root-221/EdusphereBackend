@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsArray,
   IsDateString,
   IsEmail,
   IsIn,
@@ -50,6 +51,12 @@ export class CreateTeacherDto {
   @IsOptional()
   @IsString()
   subjectId?: string;
+
+  @ApiPropertyOptional({ type: [String], description: 'Classes assignées (optionnel)' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  classIds?: string[];
 
   @ApiPropertyOptional({ example: true, default: true })
   @IsOptional()

@@ -1,6 +1,6 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../../node_modules/@prisma/tenant-client"
+  output   = "../../node_modules/@prisma/tenant-client-generated"
 }
 
 datasource db {
@@ -19,6 +19,7 @@ model User {
   phone              String?
   isActive           Boolean         @default(true)
   emailVerified      Boolean         @default(false)
+  mustChangePassword Boolean         @default(false)
   lastLoginAt        DateTime?
   failedLoginAttempts Int             @default(0)
   lockedUntil        DateTime?
@@ -124,6 +125,7 @@ model SchoolClass {
   status        String          @default("active")
   headTeacherId String?
   headTeacher   User?           @relation("ClassHeadTeacher", fields: [headTeacherId], references: [id], onDelete: SetNull)
+  teacherLinks  TeacherClass[]
   students      StudentProfile[]
   parentProfiles ParentProfile[]
   enrollments   Enrollment[]
@@ -209,11 +211,27 @@ model TeacherProfile {
   department      String?
   hireDate        DateTime?
   subjectLinks    TeacherSubject[]
+  classLinks      TeacherClass[]
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
   @@index([schoolId])
   @@index([primarySubjectId])
+}
+
+model TeacherClass {
+  id        String         @id @default(cuid())
+  schoolId  String
+  teacherId String
+  classId   String
+  teacher   TeacherProfile @relation(fields: [teacherId], references: [userId], onDelete: Cascade)
+  class     SchoolClass    @relation(fields: [classId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
+
+  @@unique([teacherId, classId])
+  @@index([schoolId])
+  @@index([teacherId])
+  @@index([classId])
 }
 
 model StudentProfile {

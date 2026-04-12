@@ -279,6 +279,18 @@ export class AcademicController {
     return { data };
   }
 
+  @Get('classes/:id/teachers')
+  @ApiOperation({ summary: 'Lister les enseignants d une classe' })
+  @ApiParam({ name: 'id', description: 'Identifiant de la classe' })
+  async listClassTeachers(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.listClassTeachers(tenant, id);
+    return { data };
+  }
+
   @Post('classes')
   @ApiBody({ type: CreateClassDto })
   async createClass(

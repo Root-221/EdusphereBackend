@@ -1,5 +1,5 @@
 import { Prisma, PrismaClient, UserRole, SchoolType, SchoolStatus } from '@prisma/client';
-import { PrismaClient as TenantPrismaClient } from '@prisma/tenant-client';
+import { PrismaClient as TenantPrismaClient } from '@prisma/tenant-client-generated';
 import * as bcrypt from 'bcrypt';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';

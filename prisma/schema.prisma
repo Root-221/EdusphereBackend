@@ -45,6 +45,7 @@ model User {
   phone            String?
   isActive         Boolean   @default(true)
   emailVerified    Boolean   @default(false)
+  mustChangePassword Boolean @default(false)
   
   // Sécurité
   lastLoginAt      DateTime?

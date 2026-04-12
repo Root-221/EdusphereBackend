@@ -482,6 +482,7 @@ export class EnrollmentService {
             phone: dto.studentPhone?.trim() || null,
             isActive: true,
             emailVerified: true,
+            mustChangePassword: true,
           },
         });
 
@@ -750,6 +751,7 @@ export class EnrollmentService {
           phone: dto.parentPhone?.trim() || null,
           isActive: true,
           emailVerified: true,
+          mustChangePassword: true,
         },
       });
 
@@ -780,6 +782,7 @@ export class EnrollmentService {
         phone: dto.parentPhone?.trim() || null,
         isActive: true,
         emailVerified: true,
+        mustChangePassword: true,
       },
     });
 
@@ -974,7 +977,7 @@ export class EnrollmentService {
       className: params.className,
     };
 
-    await Promise.all([
+    const results = await Promise.all([
       this.emailService.sendEnrollmentCredentials({
         to: params.student.user.email,
         firstName: params.student.user.firstName,
@@ -992,6 +995,28 @@ export class EnrollmentService {
         ...baseParams,
       }),
     ]);
+
+    const [studentEmailResult, parentEmailResult] = results;
+
+    if (studentEmailResult.success) {
+      this.logger.log(`Enrollment credentials sent to student ${params.student.user.email}`);
+    } else {
+      this.logger.warn(
+        `Unable to send enrollment credentials to student ${params.student.user.email}: ${
+          studentEmailResult.error ?? 'unknown error'
+        }`,
+      );
+    }
+
+    if (parentEmailResult.success) {
+      this.logger.log(`Enrollment credentials sent to parent ${params.parent.user.email}`);
+    } else {
+      this.logger.warn(
+        `Unable to send enrollment credentials to parent ${params.parent.user.email}: ${
+          parentEmailResult.error ?? 'unknown error'
+        }`,
+      );
+    }
   }
 
   private async requirePeriod(client: any, schoolId: string, id: string): Promise<any> {

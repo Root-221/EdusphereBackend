@@ -18,6 +18,7 @@ import {
 
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { RegisterSchoolDto } from './dto/register-school.dto';
 import { JwtAuthGuard } from '@common/guards/jwt-auth.guard';
 import { CurrentUser } from '@common/decorators/current-user.decorator';
@@ -66,6 +67,37 @@ export class AuthController {
       _links: {
         self: req.originalUrl,
         refresh: '/auth/refresh',
+        profile: '/auth/me',
+        logout: '/auth/logout',
+      },
+    };
+  }
+
+  @Post('change-password')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Changer le mot de passe' })
+  @ApiBody({ type: ChangePasswordDto })
+  @ApiOkResponse({ description: 'Mot de passe modifié avec succès' })
+  async changePassword(
+    @CurrentUser('sub') userId: string,
+    @CurrentTenant() tenant: ITenant | null,
+    @Body() dto: ChangePasswordDto,
+    @Req() req: any,
+  ) {
+    const ipAddress = Array.isArray(req.ip) ? req.ip[0] : req.ip || 'unknown';
+    const result = await this.authService.changePassword(
+      userId,
+      dto,
+      tenant,
+      ipAddress,
+    );
+    return {
+      data: result,
+      message: getSuccessMessage(SuccessMessage.PASSWORD_CHANGED_SUCCESS),
+      ...(tenant && { tenant: { slug: tenant.slug, name: tenant.name } }),
+      _links: {
+        self: req.originalUrl,
         profile: '/auth/me',
         logout: '/auth/logout',
       },

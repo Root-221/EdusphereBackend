@@ -12,6 +12,7 @@ export interface CreateUserDto {
   firstName: string;
   lastName: string;
   role: UserRole;
+  mustChangePassword?: boolean;
 }
 
 export interface CreateSchoolWithAdminDto {
@@ -134,6 +135,24 @@ export class AuthRepository {
     });
   }
 
+  async updateUserPassword(
+    id: string,
+    tenant: ITenant | null,
+    data: {
+      passwordHash: string;
+      mustChangePassword?: boolean;
+      passwordChangedAt?: Date;
+    },
+  ): Promise<User> {
+    const prisma = await this.resolvePrismaClient(tenant);
+    return this.withTenantSchemaRepair(tenant, () =>
+      prisma.user.update({
+        where: { id },
+        data,
+      }),
+    );
+  }
+
   async createSchoolWithAdmin(data: CreateSchoolWithAdminDto): Promise<{
     school: School;
     admin: User;
@@ -192,6 +211,7 @@ export class AuthRepository {
             role: 'SCHOOL_ADMIN',
             isActive: true,
             emailVerified: true,
+            mustChangePassword: true,
           },
         });
       });

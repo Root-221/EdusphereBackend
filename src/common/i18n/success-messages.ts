@@ -21,6 +21,10 @@ export const SuccessMessages: Record<SuccessMessage, Record<'fr' | 'en', string>
     fr: 'Profil récupéré',
     en: 'Profile fetched'
   },
+  [SuccessMessage.PASSWORD_CHANGED_SUCCESS]: {
+    fr: 'Mot de passe mis à jour avec succès',
+    en: 'Password changed successfully'
+  },
   [SuccessMessage.OPERATION_SUCCESS]: {
     fr: 'Opération réussie',
     en: 'Operation successful'

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -9,6 +10,7 @@ import * as bcrypt from 'bcrypt';
 import { TenantDatabaseService } from '@database/tenant-database.service';
 import { TenantProvisioningService } from '@database/tenant-provisioning.service';
 import { ITenant } from '@common/interfaces/tenant.interface';
+import { EmailService } from '@common/email/email.service';
 import {
   buildStudentQrCode,
   deriveAcademicYearSuffix,
@@ -32,22 +34,25 @@ import {
 const DEFAULT_TEMP_PASSWORD = 'Password123!';
 
 const STAFF_ROLE_LABELS: Record<string, string> = {
-  secretary: 'Secrétaire',
+  secretary: 'Secretaire',
   accountant: 'Comptable',
-  librarian: 'Bibliothécaire',
+  librarian: 'Bibliothecaire',
   it_support: 'Support IT',
-  pedagogical_counselor: 'Conseiller pédagogique',
+  pedagogical_counselor: 'Conseiller pedagogique',
   administrative_assistant: 'Assistant administratif',
-  studies_director: 'Directeur des études',
+  studies_director: 'Directeur des etudes',
   bursar: 'Intendant',
 };
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     private readonly tenantDatabaseService: TenantDatabaseService,
     private readonly config: ConfigService,
     private readonly tenantProvisioningService: TenantProvisioningService,
+    private readonly emailService: EmailService,
   ) {}
 
   async listTeachers(tenant: ITenant | null): Promise<any[]> {
@@ -59,6 +64,7 @@ export class UsersService {
           include: {
             primarySubject: true,
             subjectLinks: { include: { subject: true } },
+            classLinks: { include: { class: { include: { level: true } } } },
           },
         },
       },
@@ -70,9 +76,14 @@ export class UsersService {
 
   async createTeacher(tenant: ITenant | null, dto: CreateTeacherDto): Promise<any> {
     const client = await this.getClient(tenant);
-    const passwordHash = await this.hashTempPassword();
+    const { tempPassword, passwordHash } = await this.buildTempPassword();
+    const classIds = (dto.classIds ?? []).filter(Boolean);
 
     const created = await client.$transaction(async (tx: any) => {
+      if (classIds.length > 0) {
+        await this.requireClasses(tx, this.requireTenant(tenant).id, classIds);
+      }
+
       const user = await tx.user.create({
         data: {
           email: dto.email.trim().toLowerCase(),
@@ -83,6 +94,7 @@ export class UsersService {
           phone: dto.phone?.trim() || null,
           isActive: dto.isActive ?? true,
           emailVerified: true,
+          mustChangePassword: true,
         },
       });
 
@@ -104,6 +116,17 @@ export class UsersService {
         });
       }
 
+      if (classIds.length > 0) {
+        await tx.teacherClass.createMany({
+          data: classIds.map((classId) => ({
+            schoolId: this.requireTenant(tenant).id,
+            teacherId: user.id,
+            classId,
+          })),
+          skipDuplicates: true,
+        });
+      }
+
       return tx.user.findUnique({
         where: { id: user.id },
         include: {
@@ -111,10 +134,21 @@ export class UsersService {
             include: {
               primarySubject: true,
               subjectLinks: { include: { subject: true } },
+              classLinks: { include: { class: { include: { level: true } } } },
             },
           },
         },
       });
+    });
+
+    this.sendUserInviteEmailAsync({
+      tenant,
+      email: dto.email,
+      firstName: dto.firstName,
+      accountLabel: 'enseignant',
+      tempPassword,
+    }).catch((err) => {
+      this.logger.warn(`Teacher email failed for ${dto.email}: ${err.message}`);
     });
 
     return this.mapTeacher(created);
@@ -123,8 +157,13 @@ export class UsersService {
   async updateTeacher(tenant: ITenant | null, id: string, dto: UpdateTeacherDto): Promise<any> {
     const client = await this.getClient(tenant);
     const existing = await this.requireTeacher(client, id);
+    const classIds = dto.classIds ? dto.classIds.filter(Boolean) : undefined;
 
     const updated = await client.$transaction(async (tx: any) => {
+      if (classIds !== undefined && classIds.length > 0) {
+        await this.requireClasses(tx, this.requireTenant(tenant).id, classIds);
+      }
+
       const user = await tx.user.update({
         where: { id },
         data: {
@@ -157,6 +196,20 @@ export class UsersService {
         }
       }
 
+      if (classIds !== undefined) {
+        await tx.teacherClass.deleteMany({ where: { teacherId: id } });
+        if (classIds.length > 0) {
+          await tx.teacherClass.createMany({
+            data: classIds.map((classId) => ({
+              schoolId: existing.teacherProfile?.schoolId ?? this.requireTenant(tenant).id,
+              teacherId: id,
+              classId,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
+
       return tx.user.findUnique({
         where: { id },
         include: {
@@ -164,6 +217,7 @@ export class UsersService {
             include: {
               primarySubject: true,
               subjectLinks: { include: { subject: true } },
+              classLinks: { include: { class: { include: { level: true } } } },
             },
           },
         },
@@ -184,7 +238,8 @@ export class UsersService {
     return withTenantSchemaRepair(tenant, this.tenantProvisioningService, async () => {
       const client = await this.getClient(tenant);
       const schoolId = this.requireTenant(tenant).id;
-      const academicYearId = query.academicYearId ?? (await this.getDefaultAcademicYearId(client, schoolId));
+      const academicYearId =
+        query.academicYearId ?? (await this.getDefaultAcademicYearId(client, schoolId));
       const students = await client.user.findMany({
         where: {
           role: 'STUDENT',
@@ -236,7 +291,7 @@ export class UsersService {
       });
 
       if (!student) {
-        throw new NotFoundException('Élève introuvable');
+        throw new NotFoundException('Eleve introuvable');
       }
 
       return this.mapStudent(student);
@@ -248,10 +303,11 @@ export class UsersService {
       const client = await this.getClient(tenant);
       const school = this.requireTenant(tenant);
       const schoolId = school.id;
-      const passwordHash = await this.hashTempPassword();
-      const academicYearId = dto.academicYearId ?? (await this.getDefaultAcademicYearId(client, schoolId));
+      const { tempPassword, passwordHash } = await this.buildTempPassword();
+      const academicYearId =
+        dto.academicYearId ?? (await this.getDefaultAcademicYearId(client, schoolId));
       if (!academicYearId) {
-        throw new BadRequestException('Aucune année scolaire active n’est disponible.');
+        throw new BadRequestException('Aucune annee scolaire active n\'est disponible.');
       }
       await this.requireAcademicYear(client, schoolId, academicYearId);
       const schoolClass = await this.requireClass(client, schoolId, dto.classId);
@@ -264,11 +320,13 @@ export class UsersService {
       });
 
       if (existingEmail) {
-        throw new ConflictException('Un compte existe déjà avec cet email.');
+        throw new ConflictException('Un compte existe deja avec cet email.');
       }
 
       if (schoolClass.academicYearId && schoolClass.academicYearId !== academicYearId) {
-        throw new BadRequestException('La classe sélectionnée n’est pas rattachée à l’année scolaire active.');
+        throw new BadRequestException(
+          'La classe selectionnee n\'est pas rattachee a l\'annee scolaire active.',
+        );
       }
 
       const created = await client.$transaction(async (tx: any) => {
@@ -280,7 +338,7 @@ export class UsersService {
         });
 
         if (classCapacityCount >= schoolClass.capacity) {
-          throw new BadRequestException('La classe sélectionnée est complète.');
+          throw new BadRequestException('La classe selectionnee est complete.');
         }
 
         const academicYearName = await this.getAcademicYearName(tx, schoolId, academicYearId);
@@ -296,6 +354,7 @@ export class UsersService {
             phone: dto.phone?.trim() || null,
             isActive: dto.isActive ?? true,
             emailVerified: true,
+            mustChangePassword: true,
           },
         });
 
@@ -337,6 +396,16 @@ export class UsersService {
         });
       });
 
+      this.sendUserInviteEmailAsync({
+        tenant,
+        email: dto.email,
+        firstName: dto.firstName,
+        accountLabel: 'eleve',
+        tempPassword,
+      }).catch((err) => {
+        this.logger.warn(`Student email failed for ${dto.email}: ${err.message}`);
+      });
+
       return this.mapStudent(created);
     });
   }
@@ -349,18 +418,27 @@ export class UsersService {
 
       if (dto.classId !== undefined || dto.academicYearId !== undefined) {
         const resolvedAcademicYearId =
-          dto.academicYearId ?? existing.studentProfile?.academicYearId ?? (await this.getDefaultAcademicYearId(client, schoolId));
+          dto.academicYearId ??
+          existing.studentProfile?.academicYearId ??
+          (await this.getDefaultAcademicYearId(client, schoolId));
 
         if (resolvedAcademicYearId) {
           await this.requireAcademicYear(client, schoolId, resolvedAcademicYearId);
         }
 
-        const schoolClass = dto.classId !== undefined
-          ? await this.requireClass(client, schoolId, dto.classId)
-          : existing.studentProfile?.class;
+        const schoolClass =
+          dto.classId !== undefined
+            ? await this.requireClass(client, schoolId, dto.classId)
+            : existing.studentProfile?.class;
 
-        if (schoolClass?.academicYearId && resolvedAcademicYearId && schoolClass.academicYearId !== resolvedAcademicYearId) {
-          throw new BadRequestException('La classe sélectionnée n’est pas rattachée à l’année scolaire choisie.');
+        if (
+          schoolClass?.academicYearId &&
+          resolvedAcademicYearId &&
+          schoolClass.academicYearId !== resolvedAcademicYearId
+        ) {
+          throw new BadRequestException(
+            'La classe selectionnee n\'est pas rattachee a l\'annee scolaire choisie.',
+          );
         }
       }
 
@@ -380,14 +458,24 @@ export class UsersService {
           where: { userId: id },
           data: {
             ...(dto.classId !== undefined ? { classId: dto.classId || null } : {}),
-            ...(dto.academicYearId !== undefined ? { academicYearId: dto.academicYearId || null } : {}),
+            ...(dto.academicYearId !== undefined
+              ? { academicYearId: dto.academicYearId || null }
+              : {}),
             ...(dto.average !== undefined ? { average: dto.average } : {}),
-            ...(dto.enrollmentYear !== undefined ? { enrollmentYear: dto.enrollmentYear.trim() } : {}),
-            ...(dto.dateOfBirth !== undefined ? { dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null } : {}),
+            ...(dto.enrollmentYear !== undefined
+              ? { enrollmentYear: dto.enrollmentYear.trim() }
+              : {}),
+            ...(dto.dateOfBirth !== undefined
+              ? { dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null }
+              : {}),
             ...(dto.gender !== undefined ? { gender: dto.gender?.trim() || null } : {}),
             ...(dto.address !== undefined ? { address: dto.address?.trim() || null } : {}),
-            ...(dto.parentName !== undefined ? { parentName: dto.parentName?.trim() || null } : {}),
-            ...(dto.parentPhone !== undefined ? { parentPhone: dto.parentPhone?.trim() || null } : {}),
+            ...(dto.parentName !== undefined
+              ? { parentName: dto.parentName?.trim() || null }
+              : {}),
+            ...(dto.parentPhone !== undefined
+              ? { parentPhone: dto.parentPhone?.trim() || null }
+              : {}),
           },
         });
 
@@ -449,7 +537,7 @@ export class UsersService {
   async createParent(tenant: ITenant | null, dto: CreateParentDto): Promise<any> {
     const client = await this.getClient(tenant);
     const schoolId = this.requireTenant(tenant).id;
-    const passwordHash = await this.hashTempPassword();
+    const { tempPassword, passwordHash } = await this.buildTempPassword();
     if (dto.childClassId) {
       await this.requireClass(client, schoolId, dto.childClassId);
     }
@@ -465,6 +553,7 @@ export class UsersService {
           phone: dto.phone?.trim() || null,
           isActive: dto.isActive ?? true,
           emailVerified: true,
+          mustChangePassword: true,
         },
       });
 
@@ -488,6 +577,16 @@ export class UsersService {
           },
         },
       });
+    });
+
+    this.sendUserInviteEmailAsync({
+      tenant,
+      email: dto.email,
+      firstName: dto.firstName,
+      accountLabel: 'parent',
+      tempPassword,
+    }).catch((err) => {
+      this.logger.warn(`Parent email failed for ${dto.email}: ${err.message}`);
     });
 
     return this.mapParent(created);
@@ -618,17 +717,41 @@ export class UsersService {
 
   private requireTenant(tenant: ITenant | null): ITenant {
     if (!tenant) {
-      throw new BadRequestException('Le tenant de l’école est requis pour gérer les utilisateurs.');
+      throw new BadRequestException('Le tenant de l\'ecole est requis pour gerer les utilisateurs.');
     }
     return tenant;
   }
 
-  private async hashTempPassword(): Promise<string> {
+  private async buildTempPassword(): Promise<{ tempPassword: string; passwordHash: string }> {
     const tempPassword =
       this.config.get<string>('TENANT_USER_TEMP_PASSWORD') ??
       this.config.get<string>('TENANT_ADMIN_TEMP_PASSWORD') ??
       DEFAULT_TEMP_PASSWORD;
-    return bcrypt.hash(tempPassword, 12);
+    const passwordHash = await bcrypt.hash(tempPassword, 12);
+    return { tempPassword, passwordHash };
+  }
+
+  private async sendUserInviteEmailAsync(params: {
+    tenant: ITenant | null;
+    email: string;
+    firstName?: string;
+    accountLabel: string;
+    tempPassword: string;
+  }): Promise<void> {
+    const school = this.requireTenant(params.tenant);
+    const result = await this.emailService.sendUserInvitation({
+      to: params.email,
+      firstName: params.firstName,
+      schoolName: school.name,
+      tenantSlug: school.slug,
+      login: params.email,
+      password: params.tempPassword,
+      accountLabel: params.accountLabel,
+    });
+
+    if (result.success) {
+      this.logger.log(`Credentials email sent to ${params.email}`);
+    }
   }
 
   private async requireTeacher(client: any, id: string): Promise<any> {
@@ -654,23 +777,23 @@ export class UsersService {
   private async requireStudent(client: any, id: string): Promise<any> {
     const student = await client.user.findFirst({
       where: { id, role: 'STUDENT' },
-        include: {
-          studentProfile: {
-            include: {
-              academicYear: true,
-              class: {
-                include: {
-                  level: true,
-                },
+      include: {
+        studentProfile: {
+          include: {
+            academicYear: true,
+            class: {
+              include: {
+                level: true,
               },
-              parentUser: true,
             },
+            parentUser: true,
           },
         },
+      },
     });
 
     if (!student) {
-      throw new NotFoundException('Élève introuvable');
+      throw new NotFoundException('Eleve introuvable');
     }
 
     return student;
@@ -723,15 +846,33 @@ export class UsersService {
       .findFirst({ where: { id, schoolId } })
       .then((year: any) => {
         if (!year) {
-          throw new NotFoundException('Année scolaire introuvable');
+          throw new NotFoundException('Annee scolaire introuvable');
         }
         return year;
       });
   }
 
+  private async requireClasses(client: any, schoolId: string, classIds: string[]): Promise<void> {
+    if (!classIds.length) {
+      return;
+    }
+
+    const classes = await client.schoolClass.findMany({
+      where: {
+        schoolId,
+        id: { in: classIds },
+      },
+      select: { id: true },
+    });
+
+    if (classes.length !== classIds.length) {
+      throw new BadRequestException('Certaines classes sont invalides.');
+    }
+  }
+
   private requireStaffRole(roleId: string): void {
     if (!Object.prototype.hasOwnProperty.call(StaffRoleValues, roleId)) {
-      throw new BadRequestException('Rôle de personnel invalide');
+      throw new BadRequestException('Role de personnel invalide');
     }
   }
 
@@ -869,6 +1010,17 @@ export class UsersService {
     const profile = teacher.teacherProfile;
     const subjectLinks = profile?.subjectLinks ?? [];
     const primarySubject = profile?.primarySubject ?? subjectLinks[0]?.subject;
+    const classLinks = profile?.classLinks ?? [];
+    const classNames = classLinks
+      .map((link: any) => {
+        const className = link.class?.name;
+        if (!className) {
+          return '';
+        }
+        const levelName = link.class?.level?.name;
+        return levelName ? `${levelName} - ${className}` : className;
+      })
+      .filter(Boolean);
 
     return {
       id: teacher.id,
@@ -877,7 +1029,10 @@ export class UsersService {
       email: teacher.email,
       phone: teacher.phone ?? '',
       subject: primarySubject?.name ?? '',
-      subjectId: primarySubject?.id ?? profile?.primarySubjectId ?? subjectLinks[0]?.subjectId ?? '',
+      subjectId:
+        primarySubject?.id ?? profile?.primarySubjectId ?? subjectLinks[0]?.subjectId ?? '',
+      classIds: classLinks.map((link: any) => link.classId),
+      classNames,
       status: teacher.isActive ? 'active' : 'inactive',
     };
   }
@@ -885,7 +1040,10 @@ export class UsersService {
   private mapStudent(student: any, fallback?: any): any {
     const profile = student.studentProfile ?? fallback?.studentProfile;
     const parentUser = profile?.parentUser ?? fallback?.studentProfile?.parentUser;
-    const parentNameParts = (profile?.parentName ?? '').trim().split(/\s+/).filter(Boolean);
+    const parentNameParts = (profile?.parentName ?? '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
     return {
       id: student.id,
       firstName: student.firstName,
