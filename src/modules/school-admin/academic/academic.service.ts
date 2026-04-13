@@ -569,8 +569,10 @@ export class AcademicService {
       teacher: schoolClass.headTeacher
         ? `${schoolClass.headTeacher.firstName} ${schoolClass.headTeacher.lastName}`.trim()
         : '',
+      teacherIds: (schoolClass.teacherLinks ?? []).map((link: any) => link.teacherId).filter(Boolean),
       students: schoolClass.students?.length ?? 0,
       subjects: (schoolClass.subjectLinks ?? []).map((link: any) => link.subject?.name).filter(Boolean),
+      subjectIds: (schoolClass.subjectLinks ?? []).map((link: any) => link.subjectId).filter(Boolean),
       status: schoolClass.status,
       academicYearId: schoolClass.academicYearId ?? '',
       academicYear: schoolClass.academicYear?.name ?? '',
@@ -2014,6 +2016,7 @@ export class AcademicService {
       headTeacher: true,
       students: true,
       subjectLinks: { include: { subject: true } },
+      teacherLinks: { include: { teacher: { include: { user: true } } } },
       academicYear: true,
     };
   }
@@ -2649,6 +2652,8 @@ export class AcademicService {
     const subjectLinks = schoolClass?.subjectLinks ?? fallback?.subjectLinks ?? [];
     const students = schoolClass?.students ?? fallback?.students ?? [];
     const headTeacher = schoolClass?.headTeacher ?? fallback?.headTeacher;
+    const teacherLinks = schoolClass?.teacherLinks ?? fallback?.teacherLinks ?? [];
+    const teacherIds = teacherLinks.map((link: any) => link.teacherId).filter(Boolean);
     return {
       id: schoolClass.id,
       name: schoolClass.name,
@@ -2659,6 +2664,7 @@ export class AcademicService {
       teacher: headTeacher
         ? `${headTeacher.firstName} ${headTeacher.lastName}`.trim()
         : '',
+      teacherIds,
       students: students.length,
       subjects: subjectLinks.map((link: any) => link.subject?.name).filter(Boolean),
       subjectIds: subjectLinks.map((link: any) => link.subjectId).filter(Boolean),
