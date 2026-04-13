@@ -35,6 +35,7 @@ model User {
   parentEnrollments   Enrollment[]    @relation("EnrollmentParent")
   headTeacherClasses SchoolClass[]    @relation("ClassHeadTeacher")
   timetableEntries   TimetableEntry[] @relation("TimetableTeacher")
+  annualTimetableEntries AnnualTimetableEntry[] @relation("AnnualTimetableTeacher")
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 }
@@ -66,6 +67,7 @@ model AcademicYear {
   classes    SchoolClass[]
   studentProfiles StudentProfile[]
   timetables Timetable[]
+  annualTimetables AnnualTimetable[]
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
 
@@ -104,6 +106,7 @@ model Semester {
   average       Float?
   enrollments   Enrollment[]
   timetables    Timetable[]
+  annualTimetableEntries AnnualTimetableEntry[]
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
@@ -133,6 +136,8 @@ model SchoolClass {
   subjectLinks  ClassSubject[]
   timetables    Timetable[]
   timetableEntries TimetableEntry[]
+  annualTimetables AnnualTimetable[]
+  annualTimetableEntries AnnualTimetableEntry[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
@@ -173,6 +178,7 @@ model Room {
   equipment   String?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
+  annualTimetableEntries AnnualTimetableEntry[]
 
   @@index([schoolId])
   @@index([buildingId])
@@ -192,6 +198,7 @@ model Subject {
   teacherLinks  TeacherSubject[]
   classLinks    ClassSubject[]
   timetableEntries TimetableEntry[]
+  annualTimetableEntries AnnualTimetableEntry[]
   primaryTeachers TeacherProfile[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
@@ -455,6 +462,58 @@ model TimetableEntry {
   @@index([day])
   @@index([timeSlotId])
   @@unique([timetableId, day, timeSlotId])
+}
+
+model AnnualTimetable {
+  id             String               @id @default(cuid())
+  schoolId       String
+  academicYearId String
+  academicYear   AcademicYear         @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  classId        String
+  class          SchoolClass          @relation(fields: [classId], references: [id], onDelete: Cascade)
+  status         String               @default("active")
+  entries        AnnualTimetableEntry[]
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([schoolId])
+  @@index([academicYearId])
+  @@index([classId])
+  @@index([status])
+  @@unique([schoolId, academicYearId, classId])
+}
+
+model AnnualTimetableEntry {
+  id                String        @id @default(cuid())
+  schoolId          String
+  annualTimetableId String
+  annualTimetable   AnnualTimetable @relation(fields: [annualTimetableId], references: [id], onDelete: Cascade)
+  classId           String
+  class             SchoolClass   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  teacherId         String
+  teacher           User          @relation("AnnualTimetableTeacher", fields: [teacherId], references: [id], onDelete: Cascade)
+  subjectId         String
+  subject           Subject       @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  roomId            String?
+  room              Room?         @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  semesterId        String?
+  semester          Semester?     @relation(fields: [semesterId], references: [id], onDelete: SetNull)
+  dayOfWeek         String
+  startTime         String
+  endTime           String
+  dateStart         DateTime
+  dateEnd           DateTime
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([schoolId])
+  @@index([annualTimetableId])
+  @@index([classId])
+  @@index([teacherId])
+  @@index([roomId])
+  @@index([dayOfWeek])
+  @@index([dateStart])
+  @@index([dateEnd])
 }
 
 model StaffMember {

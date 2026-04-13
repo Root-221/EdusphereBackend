@@ -21,10 +21,13 @@ import {
   CreateTimeSlotDto,
   CreateTimetableDto,
   CreateTimetableEntryDto,
+  CreateAnnualTimetableDto,
+  CreateAnnualTimetableEntryDto,
   DuplicateTimetableDto,
   ListClassesQueryDto,
   ListLevelsQueryDto,
   ListSemestersQueryDto,
+  ListAnnualTimetablesQueryDto,
   ListTimetablesQueryDto,
   SemesterStatus,
   SemesterStatusValues,
@@ -41,6 +44,10 @@ import {
   UpdateTimeSlotDto,
   UpdateTimetableDto,
   UpdateTimetableEntryDto,
+  UpdateAnnualTimetableDto,
+  UpdateAnnualTimetableEntryDto,
+  MigrateAnnualTimetablesDto,
+  WeekDayValues,
 } from './academic.dto';
 
 const DEFAULT_TIME_SLOTS = [
@@ -1088,6 +1095,526 @@ export class AcademicService {
     };
   }
 
+  async listAnnualTimetableOptions(tenant: ITenant | null): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    const currentAcademicYearId = await this.getDefaultAcademicYearId(client, schoolId);
+    const currentSemesterId = await this.getDefaultSemesterId(client, schoolId, currentAcademicYearId ?? undefined);
+
+    const [academicYears, semesters, classes, subjects, teachers, rooms] = await Promise.all([
+      client.academicYear.findMany({
+        where: { schoolId },
+        orderBy: { createdAt: 'desc' },
+      }),
+      client.semester.findMany({
+        where: { schoolId },
+        include: { academicYear: true },
+        orderBy: [{ startDate: 'asc' }, { createdAt: 'asc' }],
+      }),
+      client.schoolClass.findMany({
+        where: { schoolId },
+        include: this.classInclude(),
+        orderBy: { createdAt: 'desc' },
+      }),
+      client.subject.findMany({
+        where: { schoolId },
+        include: {
+          teacherLinks: {
+            include: {
+              teacher: {
+                include: { user: true },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      client.user.findMany({
+        where: { role: 'TEACHER' },
+        include: {
+          teacherProfile: {
+            include: {
+              primarySubject: true,
+              subjectLinks: { include: { subject: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      client.room.findMany({
+        where: { schoolId },
+        include: { building: true },
+        orderBy: [{ status: 'asc' }, { name: 'asc' }],
+      }),
+    ]);
+
+    return {
+      currentAcademicYearId,
+      currentSemesterId,
+      academicYears: academicYears.map((year: any) => ({
+        id: year.id,
+        name: year.name,
+        status: year.status,
+        startDate: this.toDateOnly(year.startDate),
+        endDate: this.toDateOnly(year.endDate),
+      })),
+      semesters: semesters.map((semester: any) => ({
+        id: semester.id,
+        name: semester.name,
+        academicYearId: semester.academicYearId,
+        academicYear: semester.academicYear?.name ?? '',
+        status: semester.status,
+        startDate: this.toDateOnly(semester.startDate),
+        endDate: this.toDateOnly(semester.endDate),
+      })),
+      classes: classes.map((schoolClass: any) => this.mapClass(schoolClass)),
+      subjects: subjects.map((subject: any) => this.mapSubject(subject)),
+      teachers: teachers.map((teacher: any) => this.mapTeacher(teacher)),
+      rooms: rooms.map((room: any) => this.mapRoom(room)),
+    };
+  }
+
+  async listAnnualTimetables(
+    tenant: ITenant | null,
+    query: ListAnnualTimetablesQueryDto = {},
+  ): Promise<any[]> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    const academicYearId =
+      query.academicYearId ?? (await this.getDefaultAcademicYearId(client, schoolId));
+
+    const timetables = await client.annualTimetable.findMany({
+      where: {
+        schoolId,
+        ...(academicYearId ? { academicYearId } : {}),
+        ...(query.classId ? { classId: query.classId } : {}),
+        ...(query.status ? { status: query.status } : {}),
+      },
+      include: {
+        academicYear: true,
+        class: { include: this.classInclude() },
+        entries: {
+          include: {
+            subject: true,
+            teacher: {
+              include: {
+                teacherProfile: {
+                  include: { primarySubject: true },
+                },
+              },
+            },
+            class: { include: this.classInclude() },
+            room: { include: { building: true } },
+            semester: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return timetables.map((timetable: any) => this.mapAnnualTimetable(timetable));
+  }
+
+  async getAnnualTimetable(tenant: ITenant | null, id: string): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    const timetable = await client.annualTimetable.findFirst({
+      where: { id, schoolId },
+      include: {
+        academicYear: true,
+        class: { include: this.classInclude() },
+        entries: {
+          include: {
+            subject: true,
+            teacher: {
+              include: {
+                teacherProfile: {
+                  include: { primarySubject: true },
+                },
+              },
+            },
+            class: { include: this.classInclude() },
+            room: { include: { building: true } },
+            semester: true,
+          },
+        },
+      },
+    });
+
+    if (!timetable) {
+      throw new NotFoundException('Emploi du temps annuel introuvable');
+    }
+
+    return this.mapAnnualTimetable(timetable);
+  }
+
+  async migrateAnnualTimetables(
+    tenant: ITenant | null,
+    dto: MigrateAnnualTimetablesDto,
+  ): Promise<{ academicYearId: string; createdTimetables: number; createdEntries: number; skippedEntries: number }> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    const academicYearId =
+      dto.academicYearId ?? (await this.getDefaultAcademicYearId(client, schoolId));
+
+    if (!academicYearId) {
+      throw new BadRequestException('Aucune année scolaire active n’est disponible.');
+    }
+
+    const timetables = await client.timetable.findMany({
+      where: { schoolId, academicYearId },
+      include: {
+        academicYear: true,
+        semester: true,
+        class: { include: this.classInclude() },
+        entries: {
+          include: {
+            timeSlot: true,
+          },
+        },
+      },
+    });
+
+    let createdTimetables = 0;
+    let createdEntries = 0;
+    let skippedEntries = 0;
+
+    for (const timetable of timetables) {
+      let annualTimetable = await client.annualTimetable.findFirst({
+        where: { schoolId, academicYearId, classId: timetable.classId },
+      });
+
+      if (!annualTimetable) {
+        annualTimetable = await client.annualTimetable.create({
+          data: {
+            schoolId,
+            academicYearId,
+            classId: timetable.classId,
+            status: timetable.status ?? TimetableStatusValues.active,
+          },
+        });
+        createdTimetables += 1;
+      }
+
+      const dateStart =
+        timetable.semester?.startDate ?? timetable.academicYear?.startDate ?? new Date();
+      const dateEnd =
+        timetable.semester?.endDate ?? timetable.academicYear?.endDate ?? new Date();
+
+      for (const entry of timetable.entries) {
+        if (!entry.timeSlot || !entry.subjectId || !entry.teacherId) {
+          skippedEntries += 1;
+          continue;
+        }
+
+        const existingEntry = await client.annualTimetableEntry.findFirst({
+          where: {
+            annualTimetableId: annualTimetable.id,
+            dayOfWeek: entry.day,
+            startTime: entry.timeSlot.startTime,
+            endTime: entry.timeSlot.endTime,
+            subjectId: entry.subjectId,
+            teacherId: entry.teacherId,
+            semesterId: timetable.semesterId ?? null,
+            classId: entry.classId ?? timetable.classId,
+          },
+        });
+
+        if (existingEntry) {
+          skippedEntries += 1;
+          continue;
+        }
+
+        await client.annualTimetableEntry.create({
+          data: {
+            schoolId,
+            annualTimetableId: annualTimetable.id,
+            classId: entry.classId ?? timetable.classId,
+            teacherId: entry.teacherId,
+            subjectId: entry.subjectId,
+            roomId: null,
+            semesterId: timetable.semesterId ?? null,
+            dayOfWeek: entry.day,
+            startTime: entry.timeSlot.startTime,
+            endTime: entry.timeSlot.endTime,
+            dateStart,
+            dateEnd,
+          },
+        });
+        createdEntries += 1;
+      }
+    }
+
+    return {
+      academicYearId,
+      createdTimetables,
+      createdEntries,
+      skippedEntries,
+    };
+  }
+
+  async createAnnualTimetable(tenant: ITenant | null, dto: CreateAnnualTimetableDto): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    const academicYearId =
+      dto.academicYearId ?? (await this.getDefaultAcademicYearId(client, schoolId));
+    if (!academicYearId) {
+      throw new BadRequestException('Aucune année scolaire active n’est disponible.');
+    }
+
+    await this.requireAcademicYear(client, schoolId, academicYearId);
+    const schoolClass = await this.requireClass(client, schoolId, dto.classId);
+
+    if (schoolClass.academicYearId && schoolClass.academicYearId !== academicYearId) {
+      throw new BadRequestException('La classe doit appartenir à la même année scolaire.');
+    }
+
+    await this.ensureUniqueAnnualTimetable(client, schoolId, academicYearId, schoolClass.id);
+
+    const created = await client.annualTimetable.create({
+      data: {
+        schoolId,
+        academicYearId,
+        classId: schoolClass.id,
+        status: dto.status ?? TimetableStatusValues.active,
+      },
+      include: {
+        academicYear: true,
+        class: { include: this.classInclude() },
+        entries: true,
+      },
+    });
+
+    return this.mapAnnualTimetable(created);
+  }
+
+  async updateAnnualTimetable(
+    tenant: ITenant | null,
+    id: string,
+    dto: UpdateAnnualTimetableDto,
+  ): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    const existing = await this.requireAnnualTimetable(client, schoolId, id);
+    const academicYearId = dto.academicYearId ?? existing.academicYearId;
+    const schoolClass =
+      dto.classId !== undefined
+        ? await this.requireClass(client, schoolId, dto.classId)
+        : existing.class;
+
+    if (dto.academicYearId !== undefined || dto.classId !== undefined) {
+      await this.requireAcademicYear(client, schoolId, academicYearId);
+
+      if (schoolClass.academicYearId && schoolClass.academicYearId !== academicYearId) {
+        throw new BadRequestException('La classe doit appartenir à la même année scolaire.');
+      }
+
+      await this.ensureUniqueAnnualTimetable(client, schoolId, academicYearId, schoolClass.id, id);
+    }
+
+    const updated = await client.annualTimetable.update({
+      where: { id },
+      data: {
+        ...(dto.academicYearId !== undefined ? { academicYearId } : {}),
+        ...(dto.classId !== undefined ? { classId: schoolClass.id } : {}),
+        ...(dto.status !== undefined ? { status: dto.status } : {}),
+      },
+      include: {
+        academicYear: true,
+        class: { include: this.classInclude() },
+        entries: true,
+      },
+    });
+
+    return this.mapAnnualTimetable(updated);
+  }
+
+  async deleteAnnualTimetable(tenant: ITenant | null, id: string): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    const existing = await this.requireAnnualTimetable(client, schoolId, id);
+
+    await client.annualTimetable.delete({ where: { id } });
+
+    return this.mapAnnualTimetable(existing);
+  }
+
+  async createAnnualTimetableEntry(
+    tenant: ITenant | null,
+    annualTimetableId: string,
+    dto: CreateAnnualTimetableEntryDto,
+  ): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    const timetable = await this.requireAnnualTimetable(client, schoolId, annualTimetableId);
+    const classId = dto.classId ?? timetable.classId;
+
+    if (dto.classId && dto.classId !== timetable.classId) {
+      throw new BadRequestException('La classe doit correspondre au planning annuel.');
+    }
+
+    const academicYear = timetable.academicYear;
+    await this.requireTeacher(client, schoolId, dto.teacherId);
+    await this.requireSubject(client, schoolId, dto.subjectId);
+    await this.requireClass(client, schoolId, classId);
+    if (dto.roomId) {
+      await this.requireRoom(client, schoolId, dto.roomId);
+    }
+    if (dto.semesterId) {
+      await this.requireSemester(client, schoolId, dto.semesterId);
+    }
+
+    const { dateStart, dateEnd } = this.parseAnnualDates(dto.dateStart, dto.dateEnd);
+    this.ensureTimeOrder(dto.startTime, dto.endTime);
+    this.ensureDateInAcademicYear(dateStart, dateEnd, academicYear);
+
+    await this.assertNoAnnualTimetableConflict(client, schoolId, {
+      academicYearId: timetable.academicYearId,
+      dayOfWeek: dto.dayOfWeek,
+      startTime: dto.startTime,
+      endTime: dto.endTime,
+      dateStart,
+      dateEnd,
+      classId,
+      teacherId: dto.teacherId,
+      roomId: dto.roomId ?? null,
+    });
+
+    const created = await client.annualTimetableEntry.create({
+      data: {
+        schoolId,
+        annualTimetableId: timetable.id,
+        classId,
+        teacherId: dto.teacherId,
+        subjectId: dto.subjectId,
+        roomId: dto.roomId ?? null,
+        semesterId: dto.semesterId ?? null,
+        dayOfWeek: dto.dayOfWeek,
+        startTime: dto.startTime,
+        endTime: dto.endTime,
+        dateStart,
+        dateEnd,
+      },
+      include: {
+        subject: true,
+        teacher: {
+          include: {
+            teacherProfile: {
+              include: { primarySubject: true },
+            },
+          },
+        },
+        class: { include: this.classInclude() },
+        room: { include: { building: true } },
+        semester: true,
+      },
+    });
+
+    return this.mapAnnualTimetableEntry(created);
+  }
+
+  async updateAnnualTimetableEntry(
+    tenant: ITenant | null,
+    annualTimetableId: string,
+    entryId: string,
+    dto: UpdateAnnualTimetableEntryDto,
+  ): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    const timetable = await this.requireAnnualTimetable(client, schoolId, annualTimetableId);
+    const existing = await this.requireAnnualTimetableEntry(client, schoolId, entryId, timetable.id);
+
+    const classId = dto.classId ?? existing.classId;
+    if (dto.classId && dto.classId !== timetable.classId) {
+      throw new BadRequestException('La classe doit correspondre au planning annuel.');
+    }
+
+    if (dto.teacherId) {
+      await this.requireTeacher(client, schoolId, dto.teacherId);
+    }
+    if (dto.subjectId) {
+      await this.requireSubject(client, schoolId, dto.subjectId);
+    }
+    if (dto.roomId !== undefined && dto.roomId) {
+      await this.requireRoom(client, schoolId, dto.roomId);
+    }
+    if (dto.semesterId !== undefined && dto.semesterId) {
+      await this.requireSemester(client, schoolId, dto.semesterId);
+    }
+
+    const dayOfWeek = dto.dayOfWeek ?? existing.dayOfWeek;
+    const startTime = dto.startTime ?? existing.startTime;
+    const endTime = dto.endTime ?? existing.endTime;
+    const dateStart = dto.dateStart ? this.parseDate(dto.dateStart) : existing.dateStart;
+    const dateEnd = dto.dateEnd ? this.parseDate(dto.dateEnd) : existing.dateEnd;
+    this.ensureTimeOrder(startTime, endTime);
+    this.ensureDateInAcademicYear(dateStart, dateEnd, timetable.academicYear);
+
+    await this.assertNoAnnualTimetableConflict(client, schoolId, {
+      academicYearId: timetable.academicYearId,
+      dayOfWeek,
+      startTime,
+      endTime,
+      dateStart,
+      dateEnd,
+      classId,
+      teacherId: dto.teacherId ?? existing.teacherId,
+      roomId: dto.roomId !== undefined ? dto.roomId : existing.roomId,
+      excludeEntryId: existing.id,
+    });
+
+    const updated = await client.annualTimetableEntry.update({
+      where: { id: existing.id },
+      data: {
+        ...(dto.classId !== undefined ? { classId } : {}),
+        ...(dto.teacherId !== undefined ? { teacherId: dto.teacherId } : {}),
+        ...(dto.subjectId !== undefined ? { subjectId: dto.subjectId } : {}),
+        ...(dto.roomId !== undefined ? { roomId: dto.roomId || null } : {}),
+        ...(dto.semesterId !== undefined ? { semesterId: dto.semesterId || null } : {}),
+        ...(dto.dayOfWeek !== undefined ? { dayOfWeek } : {}),
+        ...(dto.startTime !== undefined ? { startTime } : {}),
+        ...(dto.endTime !== undefined ? { endTime } : {}),
+        ...(dto.dateStart !== undefined ? { dateStart } : {}),
+        ...(dto.dateEnd !== undefined ? { dateEnd } : {}),
+      },
+      include: {
+        subject: true,
+        teacher: {
+          include: {
+            teacherProfile: {
+              include: { primarySubject: true },
+            },
+          },
+        },
+        class: { include: this.classInclude() },
+        room: { include: { building: true } },
+        semester: true,
+      },
+    });
+
+    return this.mapAnnualTimetableEntry(updated);
+  }
+
+  async deleteAnnualTimetableEntry(
+    tenant: ITenant | null,
+    annualTimetableId: string,
+    entryId: string,
+  ): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    await this.requireAnnualTimetable(client, schoolId, annualTimetableId);
+    const existing = await this.requireAnnualTimetableEntry(client, schoolId, entryId, annualTimetableId);
+    const deleted = await client.annualTimetableEntry.delete({ where: { id: existing.id } });
+    return {
+      id: deleted.id,
+      annualTimetableId: deleted.annualTimetableId,
+      classId: deleted.classId,
+      teacherId: deleted.teacherId,
+      subjectId: deleted.subjectId,
+      roomId: deleted.roomId ?? null,
+    };
+  }
+
   async createTimetable(tenant: ITenant | null, dto: CreateTimetableDto): Promise<any> {
     const client = await this.getClient(tenant);
     const schoolId = this.requireTenant(tenant).id;
@@ -1600,6 +2127,82 @@ export class AcademicService {
     return teacher;
   }
 
+  private async requireRoom(client: any, schoolId: string, id: string): Promise<any> {
+    const room = await client.room.findFirst({
+      where: { id, schoolId },
+      include: { building: true },
+    });
+    if (!room) {
+      throw new NotFoundException('Salle introuvable');
+    }
+    return room;
+  }
+
+  private async requireAnnualTimetable(
+    client: any,
+    schoolId: string,
+    id: string,
+  ): Promise<any> {
+    const timetable = await client.annualTimetable.findFirst({
+      where: { id, schoolId },
+      include: {
+        academicYear: true,
+        class: { include: this.classInclude() },
+        entries: {
+          include: {
+            subject: true,
+            teacher: {
+              include: {
+                teacherProfile: {
+                  include: { primarySubject: true },
+                },
+              },
+            },
+            class: { include: this.classInclude() },
+            room: { include: { building: true } },
+            semester: true,
+          },
+        },
+      },
+    });
+
+    if (!timetable) {
+      throw new NotFoundException('Emploi du temps annuel introuvable');
+    }
+
+    return timetable;
+  }
+
+  private async requireAnnualTimetableEntry(
+    client: any,
+    schoolId: string,
+    id: string,
+    annualTimetableId: string,
+  ): Promise<any> {
+    const entry = await client.annualTimetableEntry.findFirst({
+      where: { id, schoolId, annualTimetableId },
+      include: {
+        subject: true,
+        teacher: {
+          include: {
+            teacherProfile: {
+              include: { primarySubject: true },
+            },
+          },
+        },
+        class: { include: this.classInclude() },
+        room: { include: { building: true } },
+        semester: true,
+      },
+    });
+
+    if (!entry) {
+      throw new NotFoundException('Cours annuel introuvable');
+    }
+
+    return entry;
+  }
+
   private async requireTimetable(client: any, schoolId: string, id: string): Promise<any> {
     const timetable = await client.timetable.findFirst({
       where: { id, schoolId },
@@ -1684,6 +2287,27 @@ export class AcademicService {
 
     if (existing) {
       throw new BadRequestException('Un emploi du temps existe déjà pour cette classe et ce semestre.');
+    }
+  }
+
+  private async ensureUniqueAnnualTimetable(
+    client: any,
+    schoolId: string,
+    academicYearId: string,
+    classId: string,
+    excludeId?: string,
+  ): Promise<void> {
+    const existing = await client.annualTimetable.findFirst({
+      where: {
+        schoolId,
+        academicYearId,
+        classId,
+        ...(excludeId ? { id: { not: excludeId } } : {}),
+      },
+    });
+
+    if (existing) {
+      throw new BadRequestException('Un emploi du temps annuel existe déjà pour cette classe.');
     }
   }
 
@@ -1865,6 +2489,94 @@ export class AcademicService {
     return normalized ? normalized : null;
   }
 
+  private async assertNoAnnualTimetableConflict(
+    client: any,
+    schoolId: string,
+    params: {
+      academicYearId: string;
+      dayOfWeek: string;
+      startTime: string;
+      endTime: string;
+      dateStart: Date;
+      dateEnd: Date;
+      classId: string;
+      teacherId: string;
+      roomId?: string | null;
+      excludeEntryId?: string;
+    },
+  ): Promise<void> {
+    const conflict = await client.annualTimetableEntry.findFirst({
+      where: {
+        schoolId,
+        dayOfWeek: params.dayOfWeek,
+        dateStart: { lte: params.dateEnd },
+        dateEnd: { gte: params.dateStart },
+        startTime: { lt: params.endTime },
+        endTime: { gt: params.startTime },
+        ...(params.excludeEntryId ? { id: { not: params.excludeEntryId } } : {}),
+        annualTimetable: { academicYearId: params.academicYearId },
+        OR: [
+          { classId: params.classId },
+          { teacherId: params.teacherId },
+          ...(params.roomId ? [{ roomId: params.roomId }] : []),
+        ],
+      },
+      include: {
+        class: true,
+        teacher: true,
+        room: true,
+      },
+    });
+
+    if (!conflict) {
+      return;
+    }
+
+    const conflictLabel =
+      conflict.teacherId === params.teacherId
+        ? 'Le professeur a déjà un cours sur ce créneau.'
+        : conflict.classId === params.classId
+          ? 'La classe a déjà un cours sur ce créneau.'
+          : 'La salle est déjà occupée sur ce créneau.';
+
+    throw new ConflictException(conflictLabel);
+  }
+
+  private ensureTimeOrder(startTime: string, endTime: string): void {
+    if (startTime >= endTime) {
+      throw new BadRequestException('L heure de fin doit être après l heure de début.');
+    }
+  }
+
+  private parseAnnualDates(dateStart: string, dateEnd: string): { dateStart: Date; dateEnd: Date } {
+    const start = this.parseDate(dateStart);
+    const end = this.parseDate(dateEnd);
+    if (start > end) {
+      throw new BadRequestException('La date de fin doit être postérieure à la date de début.');
+    }
+    return { dateStart: start, dateEnd: end };
+  }
+
+  private parseDate(value: string): Date {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      throw new BadRequestException('Date invalide.');
+    }
+    return date;
+  }
+
+  private ensureDateInAcademicYear(dateStart: Date, dateEnd: Date, academicYear: any): void {
+    if (!academicYear?.startDate || !academicYear?.endDate) {
+      return;
+    }
+
+    const yearStart = new Date(academicYear.startDate);
+    const yearEnd = new Date(academicYear.endDate);
+    if (dateStart < yearStart || dateEnd > yearEnd) {
+      throw new BadRequestException('Les dates doivent rester dans l année scolaire.');
+    }
+  }
+
   private async getDefaultAcademicYearId(client: any, schoolId: string): Promise<string | null> {
     const active = await client.academicYear.findFirst({
       where: { schoolId, status: AcademicYearStatusValues.active },
@@ -1983,6 +2695,18 @@ export class AcademicService {
     };
   }
 
+  private mapRoom(room: any): any {
+    return {
+      id: room.id,
+      name: room.name,
+      buildingId: room.buildingId ?? '',
+      buildingName: room.building?.name ?? '',
+      status: room.status,
+      capacity: room.capacity ?? 0,
+      roomType: room.roomType ?? '',
+    };
+  }
+
   private mapTeacher(user: any): any {
     const teacherProfile = user.teacherProfile;
     const subjectLinks = teacherProfile?.subjectLinks ?? [];
@@ -2095,6 +2819,85 @@ export class AcademicService {
     };
   }
 
+  private mapAnnualTimetable(timetable: any): any {
+    return {
+      id: timetable.id,
+      academicYearId: timetable.academicYearId,
+      academicYear: {
+        id: timetable.academicYear?.id ?? '',
+        name: timetable.academicYear?.name ?? '',
+        status: timetable.academicYear?.status ?? '',
+        startDate: this.toDateOnly(timetable.academicYear?.startDate),
+        endDate: this.toDateOnly(timetable.academicYear?.endDate),
+      },
+      classId: timetable.classId,
+      class: this.mapClass(timetable.class),
+      status: timetable.status,
+      entries: (timetable.entries ?? [])
+        .map((entry: any) => this.mapAnnualTimetableEntry(entry))
+        .sort((a: any, b: any) => {
+          const dayOrder = this.getDayOrder(a.dayOfWeek) - this.getDayOrder(b.dayOfWeek);
+          if (dayOrder !== 0) {
+            return dayOrder;
+          }
+          return a.startTime.localeCompare(b.startTime);
+        }),
+      createdAt: this.toIso(timetable.createdAt),
+      updatedAt: this.toIso(timetable.updatedAt),
+    };
+  }
+
+  private mapAnnualTimetableEntry(entry: any): any {
+    const teacher = entry.teacher ? this.mapTeacher(entry.teacher) : null;
+    return {
+      id: entry.id,
+      annualTimetableId: entry.annualTimetableId,
+      dayOfWeek: entry.dayOfWeek,
+      startTime: entry.startTime,
+      endTime: entry.endTime,
+      dateStart: this.toDateOnly(entry.dateStart),
+      dateEnd: this.toDateOnly(entry.dateEnd),
+      subjectId: entry.subjectId,
+      subject: {
+        id: entry.subject?.id ?? '',
+        name: entry.subject?.name ?? '',
+        coefficient: entry.subject?.coefficient ?? 0,
+      },
+      teacherId: entry.teacherId,
+      teacher: teacher
+        ? {
+            id: teacher.id,
+            firstName: teacher.firstName,
+            name: teacher.name,
+            email: teacher.email,
+            subject: teacher.subject,
+            subjectId: teacher.subjectId,
+          }
+        : null,
+      classId: entry.classId,
+      class: {
+        id: entry.class?.id ?? '',
+        name: entry.class?.name ?? '',
+        capacity: entry.class?.capacity ?? 0,
+        levelId: entry.class?.levelId ?? '',
+        level: this.mapLevel(entry.class?.level),
+      },
+      roomId: entry.roomId ?? null,
+      room: entry.room ? this.mapRoom(entry.room) : null,
+      semesterId: entry.semesterId ?? null,
+      semester: entry.semester
+        ? {
+            id: entry.semester.id,
+            name: entry.semester.name,
+            academicYearId: entry.semester.academicYearId ?? '',
+            startDate: this.toDateOnly(entry.semester.startDate),
+            endDate: this.toDateOnly(entry.semester.endDate),
+            status: entry.semester.status ?? '',
+          }
+        : null,
+    };
+  }
+
   private mapTimetableEntry(entry: any): any {
     const teacher = entry.teacher ? this.mapTeacher(entry.teacher) : null;
     return {
@@ -2139,7 +2942,7 @@ export class AcademicService {
 
   private getDayOrder(day: string): number {
     const normalized = day.trim().toLowerCase();
-    const order = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
+    const order = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
     const index = order.indexOf(normalized);
     return index === -1 ? order.length : index;
   }

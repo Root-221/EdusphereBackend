@@ -41,10 +41,13 @@ import {
   CreateTimeSlotDto,
   CreateTimetableDto,
   CreateTimetableEntryDto,
+  CreateAnnualTimetableDto,
+  CreateAnnualTimetableEntryDto,
   DuplicateTimetableDto,
   ListClassesQueryDto,
   ListLevelsQueryDto,
   ListSemestersQueryDto,
+  ListAnnualTimetablesQueryDto,
   ListTimetablesQueryDto,
   LevelStatusValues,
   UpdateAcademicYearDto,
@@ -57,6 +60,9 @@ import {
   UpdateTimeSlotDto,
   UpdateTimetableDto,
   UpdateTimetableEntryDto,
+  UpdateAnnualTimetableDto,
+  UpdateAnnualTimetableEntryDto,
+  MigrateAnnualTimetablesDto,
 } from './academic.dto';
 import { AcademicService } from './academic.service';
 
@@ -440,6 +446,123 @@ export class AcademicController {
   @ApiOperation({ summary: 'Options utiles à la création d un emploi du temps' })
   async listTimetableOptions(@CurrentTenant() tenant: ITenant | null, @Req() req: Request) {
     const data = await this.academicService.listTimetableOptions(tenant);
+    return { data };
+  }
+
+  @Get('annual-timetables/options')
+  @ApiOperation({ summary: 'Options utiles à la planification annuelle' })
+  async listAnnualTimetableOptions(@CurrentTenant() tenant: ITenant | null, @Req() req: Request) {
+    const data = await this.academicService.listAnnualTimetableOptions(tenant);
+    return { data };
+  }
+
+  @Get('annual-timetables')
+  @ApiOperation({ summary: 'Lister les emplois du temps annuels' })
+  async listAnnualTimetables(
+    @CurrentTenant() tenant: ITenant | null,
+    @Query() query: ListAnnualTimetablesQueryDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.listAnnualTimetables(tenant, query);
+    return { data };
+  }
+
+  @Post('annual-timetables/migrate')
+  @ApiOperation({ summary: 'Migrer les emplois du temps semestriels vers la version annuelle' })
+  @ApiBody({ type: MigrateAnnualTimetablesDto })
+  async migrateAnnualTimetables(
+    @CurrentTenant() tenant: ITenant | null,
+    @Body() dto: MigrateAnnualTimetablesDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.migrateAnnualTimetables(tenant, dto);
+    return { data };
+  }
+
+  @Get('annual-timetables/:id')
+  @ApiParam({ name: 'id', description: 'Identifiant de l emploi du temps annuel' })
+  async getAnnualTimetable(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.getAnnualTimetable(tenant, id);
+    return { data };
+  }
+
+  @Post('annual-timetables')
+  @ApiBody({ type: CreateAnnualTimetableDto })
+  async createAnnualTimetable(
+    @CurrentTenant() tenant: ITenant | null,
+    @Body() dto: CreateAnnualTimetableDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.createAnnualTimetable(tenant, dto);
+    return { data };
+  }
+
+  @Patch('annual-timetables/:id')
+  @ApiParam({ name: 'id', description: 'Identifiant de l emploi du temps annuel' })
+  @ApiBody({ type: UpdateAnnualTimetableDto })
+  async updateAnnualTimetable(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Body() dto: UpdateAnnualTimetableDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.updateAnnualTimetable(tenant, id, dto);
+    return { data };
+  }
+
+  @Delete('annual-timetables/:id')
+  @ApiParam({ name: 'id', description: 'Identifiant de l emploi du temps annuel' })
+  async deleteAnnualTimetable(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.deleteAnnualTimetable(tenant, id);
+    return { data };
+  }
+
+  @Post('annual-timetables/:id/entries')
+  @ApiParam({ name: 'id', description: 'Identifiant de l emploi du temps annuel' })
+  @ApiBody({ type: CreateAnnualTimetableEntryDto })
+  async createAnnualTimetableEntry(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Body() dto: CreateAnnualTimetableEntryDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.createAnnualTimetableEntry(tenant, id, dto);
+    return { data };
+  }
+
+  @Patch('annual-timetables/:id/entries/:entryId')
+  @ApiParam({ name: 'id', description: 'Identifiant de l emploi du temps annuel' })
+  @ApiParam({ name: 'entryId', description: 'Identifiant du cours' })
+  @ApiBody({ type: UpdateAnnualTimetableEntryDto })
+  async updateAnnualTimetableEntry(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Param('entryId') entryId: string,
+    @Body() dto: UpdateAnnualTimetableEntryDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.updateAnnualTimetableEntry(tenant, id, entryId, dto);
+    return { data };
+  }
+
+  @Delete('annual-timetables/:id/entries/:entryId')
+  @ApiParam({ name: 'id', description: 'Identifiant de l emploi du temps annuel' })
+  @ApiParam({ name: 'entryId', description: 'Identifiant du cours' })
+  async deleteAnnualTimetableEntry(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Param('entryId') entryId: string,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.deleteAnnualTimetableEntry(tenant, id, entryId);
     return { data };
   }
 

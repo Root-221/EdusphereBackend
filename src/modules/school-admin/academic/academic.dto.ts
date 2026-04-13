@@ -62,6 +62,18 @@ export const TimetableStatusValues = {
 export type TimetableStatus =
   (typeof TimetableStatusValues)[keyof typeof TimetableStatusValues];
 
+export const WeekDayValues = {
+  monday: 'Lundi',
+  tuesday: 'Mardi',
+  wednesday: 'Mercredi',
+  thursday: 'Jeudi',
+  friday: 'Vendredi',
+  saturday: 'Samedi',
+  sunday: 'Dimanche',
+} as const;
+
+export type WeekDay = (typeof WeekDayValues)[keyof typeof WeekDayValues];
+
 export class CreateAcademicYearDto {
   @ApiProperty({ example: '2025-2026' })
   @IsString()
@@ -137,6 +149,23 @@ export class ListTimetablesQueryDto {
   @IsOptional()
   @IsString()
   semesterId?: string;
+
+  @ApiPropertyOptional({ example: 'cmbx123class01' })
+  @IsOptional()
+  @IsString()
+  classId?: string;
+
+  @ApiPropertyOptional({ enum: TimetableStatusValues })
+  @IsOptional()
+  @IsEnum(TimetableStatusValues)
+  status?: TimetableStatus;
+}
+
+export class ListAnnualTimetablesQueryDto {
+  @ApiPropertyOptional({ example: 'cmbx123ay01' })
+  @IsOptional()
+  @IsString()
+  academicYearId?: string;
 
   @ApiPropertyOptional({ example: 'cmbx123class01' })
   @IsOptional()
@@ -397,3 +426,86 @@ export class CreateTimetableEntryDto {
 }
 
 export class UpdateTimetableEntryDto extends PartialType(CreateTimetableEntryDto) {}
+
+export class CreateAnnualTimetableDto {
+  @ApiPropertyOptional({
+    example: 'cmbx123ay01',
+    description: "Optionnel. Si absent, l'année active est utilisée.",
+  })
+  @IsOptional()
+  @IsString()
+  academicYearId?: string;
+
+  @ApiProperty({ example: 'cmbx123class01' })
+  @IsString()
+  @IsNotEmpty()
+  classId: string;
+
+  @ApiPropertyOptional({ enum: TimetableStatusValues, default: TimetableStatusValues.active })
+  @IsOptional()
+  @IsEnum(TimetableStatusValues)
+  status?: TimetableStatus;
+}
+
+export class UpdateAnnualTimetableDto extends PartialType(CreateAnnualTimetableDto) {}
+
+export class MigrateAnnualTimetablesDto {
+  @ApiPropertyOptional({
+    example: 'cmbx123ay01',
+    description: "Optionnel. Si absent, l'année active est utilisée.",
+  })
+  @IsOptional()
+  @IsString()
+  academicYearId?: string;
+}
+
+export class CreateAnnualTimetableEntryDto {
+  @ApiProperty({ example: WeekDayValues.monday })
+  @IsEnum(WeekDayValues)
+  dayOfWeek: WeekDay;
+
+  @ApiProperty({ example: '08:00' })
+  @IsString()
+  @IsNotEmpty()
+  startTime: string;
+
+  @ApiProperty({ example: '10:00' })
+  @IsString()
+  @IsNotEmpty()
+  endTime: string;
+
+  @ApiProperty({ example: '2025-09-01' })
+  @IsDateString()
+  dateStart: string;
+
+  @ApiProperty({ example: '2026-07-15' })
+  @IsDateString()
+  dateEnd: string;
+
+  @ApiProperty({ example: 'cmbx123subject01' })
+  @IsString()
+  @IsNotEmpty()
+  subjectId: string;
+
+  @ApiProperty({ example: 'cmbx123teacher01' })
+  @IsString()
+  @IsNotEmpty()
+  teacherId: string;
+
+  @ApiPropertyOptional({ example: 'cmbx123class01' })
+  @IsOptional()
+  @IsString()
+  classId?: string;
+
+  @ApiPropertyOptional({ example: 'cmbx123room01' })
+  @IsOptional()
+  @IsString()
+  roomId?: string;
+
+  @ApiPropertyOptional({ example: 'cmbx123sem01' })
+  @IsOptional()
+  @IsString()
+  semesterId?: string;
+}
+
+export class UpdateAnnualTimetableEntryDto extends PartialType(CreateAnnualTimetableEntryDto) {}
