@@ -74,6 +74,15 @@ export const WeekDayValues = {
 
 export type WeekDay = (typeof WeekDayValues)[keyof typeof WeekDayValues];
 
+export const CourseStatusValues = {
+  SCHEDULED: 'SCHEDULED',
+  IN_PROGRESS: 'IN_PROGRESS',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+} as const;
+
+export type CourseStatus = (typeof CourseStatusValues)[keyof typeof CourseStatusValues];
+
 export class CreateAcademicYearDto {
   @ApiProperty({ example: '2025-2026' })
   @IsString()
@@ -176,6 +185,11 @@ export class ListAnnualTimetablesQueryDto {
   @IsOptional()
   @IsEnum(TimetableStatusValues)
   status?: TimetableStatus;
+
+  @ApiPropertyOptional({ example: '2026-04-13' })
+  @IsOptional()
+  @IsString()
+  weekStartDate?: string;
 }
 
 export class CreateSemesterDto {
@@ -509,3 +523,16 @@ export class CreateAnnualTimetableEntryDto {
 }
 
 export class UpdateAnnualTimetableEntryDto extends PartialType(CreateAnnualTimetableEntryDto) {}
+
+export class UpdateCourseStatusDto {
+  @ApiProperty({ enum: CourseStatusValues })
+  @IsEnum(CourseStatusValues)
+  status: CourseStatus;
+}
+
+export class CancelCourseDto {
+  @ApiPropertyOptional({ example: 'Raison de l\'annulation' })
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}

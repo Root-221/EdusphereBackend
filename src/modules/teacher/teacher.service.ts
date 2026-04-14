@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { TenantDatabaseService } from '@database/tenant-database.service';
 import { ITenant } from '@common/interfaces/tenant.interface';
+import { CourseStatusValues } from '../school-admin/academic/academic.dto';
 
 @Injectable()
 export class TeacherService {
@@ -295,6 +296,32 @@ export class TeacherService {
       query.semesterId ??
       (academicYearId ? await this.getDefaultSemesterId(client, schoolId, academicYearId) : null);
 
+    let startOfWeek: Date;
+    if (query.weekStartDate) {
+      startOfWeek = new Date(query.weekStartDate);
+      startOfWeek.setHours(0, 0, 0, 0);
+    } else {
+      const now = new Date();
+      startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay() + 1);
+      startOfWeek.setHours(0, 0, 0, 0);
+    }
+
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    await client.annualTimetableEntry.updateMany({
+      where: {
+        schoolId,
+        teacherId,
+        status: { in: ['IN_PROGRESS', 'COMPLETED'] },
+        dateStart: { lte: endOfWeek },
+        dateEnd: { gte: startOfWeek },
+      },
+      data: { status: 'SCHEDULED' },
+    });
+
     const entries = await client.annualTimetableEntry.findMany({
       where: {
         schoolId,
@@ -320,6 +347,9 @@ export class TeacherService {
       endTime: entry.endTime,
       dateStart: entry.dateStart,
       dateEnd: entry.dateEnd,
+      status: entry.status || 'SCHEDULED',
+      cancelledAt: entry.cancelledAt ? entry.cancelledAt.toISOString() : null,
+      cancellationReason: entry.cancellationReason ?? null,
       subject: {
         id: entry.subject?.id ?? '',
         name: entry.subject?.name ?? '',
@@ -341,5 +371,53 @@ export class TeacherService {
       academicYearId: entry.annualTimetable?.academicYearId ?? entry.class?.academicYearId ?? '',
       academicYearName: entry.annualTimetable?.academicYear?.name ?? entry.class?.academicYear?.name ?? '',
     }));
+  }
+
+  async cancelCourse(
+    tenant: ITenant | null,
+    teacherId: string,
+    courseId: string,
+    dto: { reason?: string },
+  ): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+
+    const entry = await client.annualTimetableEntry.findFirst({
+      where: { id: courseId, schoolId, teacherId },
+    });
+
+    if (!entry) {
+      throw new NotFoundException('Cours introuvable ou vous n\'êtes pas autorisé à annuler ce cours.');
+    }
+
+    if (entry.status === CourseStatusValues.CANCELLED) {
+      throw new BadRequestException('Ce cours est déjà annulé.');
+    }
+
+    if (entry.status === CourseStatusValues.COMPLETED) {
+      throw new BadRequestException('Impossible d\'annuler un cours déjà terminé.');
+    }
+
+    const updated = await client.annualTimetableEntry.update({
+      where: { id: courseId },
+      data: {
+        status: CourseStatusValues.CANCELLED,
+        cancelledAt: new Date(),
+        cancellationReason: dto.reason ?? null,
+      },
+      include: {
+        subject: true,
+        class: { include: { level: true } },
+        room: { include: { building: true } },
+        semester: true,
+      },
+    });
+
+    return {
+      id: updated.id,
+      status: updated.status,
+      cancelledAt: updated.cancelledAt,
+      cancellationReason: updated.cancellationReason,
+    };
   }
 }

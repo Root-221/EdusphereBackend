@@ -1,7 +1,9 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
+  Post,
   Query,
   Req,
   UseGuards,
@@ -22,7 +24,7 @@ import { RolesGuard } from '@common/guards/roles.guard';
 import { ITenant } from '@common/interfaces/tenant.interface';
 import { UserRole } from '@prisma/client';
 import { TeacherService } from './teacher.service';
-import { ListTeacherClassesQueryDto, ListTeacherTimetableQueryDto } from './teacher.dto';
+import { ListTeacherClassesQueryDto, ListTeacherTimetableQueryDto, CancelTeacherCourseDto } from './teacher.dto';
 
 @ApiTags('Teacher')
 @ApiBearerAuth()
@@ -62,7 +64,7 @@ export class TeacherController {
 
   @Get('classes/:id/students')
   @ApiParam({ name: 'id', description: 'Identifiant de la classe' })
-  @ApiOperation({ summary: 'Lister les élèves d’une classe du professeur' })
+  @ApiOperation({ summary: "Lister les élèves d'une classe du professeur" })
   async listClassStudents(
     @CurrentTenant() tenant: ITenant | null,
     @CurrentUser('sub') teacherId: string,
@@ -74,7 +76,7 @@ export class TeacherController {
   }
 
   @Get('timetable/options')
-  @ApiOperation({ summary: 'Options pour l’emploi du temps du professeur' })
+  @ApiOperation({ summary: "Options pour l'emploi du temps du professeur" })
   async getTimetableOptions(
     @CurrentTenant() tenant: ITenant | null,
     @CurrentUser('sub') teacherId: string,
@@ -85,7 +87,7 @@ export class TeacherController {
   }
 
   @Get('timetable')
-  @ApiOperation({ summary: 'Lister l’emploi du temps du professeur' })
+  @ApiOperation({ summary: "Lister l'emploi du temps du professeur" })
   async listTimetable(
     @CurrentTenant() tenant: ITenant | null,
     @CurrentUser('sub') teacherId: string,
@@ -93,6 +95,20 @@ export class TeacherController {
     @Req() req: Request,
   ) {
     const data = await this.teacherService.listTeacherTimetableEntries(tenant, teacherId, query);
+    return { data };
+  }
+
+  @Post('courses/:courseId/cancel')
+  @ApiOperation({ summary: 'Annuler un cours' })
+  @ApiParam({ name: 'courseId', description: 'Identifiant du cours' })
+  async cancelCourse(
+    @CurrentTenant() tenant: ITenant | null,
+    @CurrentUser('sub') teacherId: string,
+    @Param('courseId') courseId: string,
+    @Body() dto: CancelTeacherCourseDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.teacherService.cancelCourse(tenant, teacherId, courseId, dto);
     return { data };
   }
 }

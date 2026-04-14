@@ -1,6 +1,7 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from '@database/prisma.module';
 import { AuthModule } from '@modules/auth/auth.module';
 import { SuperAdminModule } from '@modules/super-admin/super-admin.module';
@@ -10,6 +11,7 @@ import { EnrollmentModule } from '@modules/school-admin/enrollments/enrollment.m
 import { SchoolProfileModule } from '@modules/school-admin/school-profile/school-profile.module';
 import { UsersModule } from '@modules/school-admin/users/users.module';
 import { TeacherModule } from '@modules/teacher/teacher.module';
+import { CourseSchedulerModule } from '@modules/school-admin/course-scheduler/course-scheduler.module';
 import { HealthController } from './app/health.controller';
 import { RootController } from './app/root.controller';
 import { TenantMiddleware } from '@common/middleware/tenant.middleware';
@@ -28,6 +30,7 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
         },
       ],
     }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     SuperAdminModule,
@@ -37,6 +40,7 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     SchoolProfileModule,
     UsersModule,
     TeacherModule,
+    CourseSchedulerModule,
   ],
   controllers: [HealthController, RootController],
 })

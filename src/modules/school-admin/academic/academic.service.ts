@@ -13,6 +13,7 @@ import {
   AssignClassSubjectsDto,
   AssignSubjectTeachersDto,
   ClassStatusValues,
+  CourseStatusValues,
   CreateAcademicYearDto,
   CreateClassDto,
   CreateLevelDto,
@@ -1214,6 +1215,39 @@ export class AcademicService {
       orderBy: { createdAt: 'desc' },
     });
 
+    let startOfWeek: Date;
+    let endOfWeek: Date;
+
+    if (query.weekStartDate) {
+      startOfWeek = new Date(query.weekStartDate);
+      startOfWeek.setHours(0, 0, 0, 0);
+      endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      endOfWeek.setHours(23, 59, 59, 999);
+    } else {
+      const now = new Date();
+      startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay() + 1);
+      startOfWeek.setHours(0, 0, 0, 0);
+      endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      endOfWeek.setHours(23, 59, 59, 999);
+    }
+
+    for (const timetable of timetables) {
+      await client.annualTimetableEntry.updateMany({
+        where: {
+          annualTimetableId: timetable.id,
+          status: { in: [CourseStatusValues.IN_PROGRESS, CourseStatusValues.COMPLETED] },
+          dateStart: { lte: endOfWeek },
+          dateEnd: { gte: startOfWeek },
+        },
+        data: {
+          status: CourseStatusValues.SCHEDULED,
+        },
+      });
+    }
+
     return timetables.map((timetable: any) => this.mapAnnualTimetable(timetable));
   }
 
@@ -1246,6 +1280,28 @@ export class AcademicService {
     if (!timetable) {
       throw new NotFoundException('Emploi du temps annuel introuvable');
     }
+
+    const now = new Date();
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay() + 1);
+    startOfWeek.setHours(0, 0, 0, 0);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    await client.annualTimetableEntry.updateMany({
+      where: {
+        annualTimetableId: timetable.id,
+        status: { in: [CourseStatusValues.IN_PROGRESS, CourseStatusValues.COMPLETED] },
+        OR: [
+          { dateStart: { gte: startOfWeek } },
+          { dateEnd: { gte: startOfWeek } },
+        ],
+      },
+      data: {
+        status: CourseStatusValues.SCHEDULED,
+      },
+    });
 
     return this.mapAnnualTimetable(timetable);
   }
@@ -1341,6 +1397,7 @@ export class AcademicService {
             endTime: entry.timeSlot.endTime,
             dateStart,
             dateEnd,
+            status: CourseStatusValues.SCHEDULED,
           },
         });
         createdEntries += 1;
@@ -1496,6 +1553,7 @@ export class AcademicService {
         endTime: dto.endTime,
         dateStart,
         dateEnd,
+        status: CourseStatusValues.SCHEDULED,
       },
       include: {
         subject: true,
@@ -1615,6 +1673,116 @@ export class AcademicService {
       subjectId: deleted.subjectId,
       roomId: deleted.roomId ?? null,
     };
+  }
+
+  async updateAnnualTimetableEntryStatus(
+    tenant: ITenant | null,
+    annualTimetableId: string,
+    entryId: string,
+    dto: { status: string },
+  ): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    await this.requireAnnualTimetable(client, schoolId, annualTimetableId);
+    const existing = await this.requireAnnualTimetableEntry(client, schoolId, entryId, annualTimetableId);
+
+    if (existing.status === CourseStatusValues.COMPLETED) {
+      throw new BadRequestException('Impossible de modifier le statut d\'un cours terminé.');
+    }
+
+    if (existing.status === CourseStatusValues.CANCELLED && dto.status !== CourseStatusValues.SCHEDULED) {
+      throw new BadRequestException('Vous pouvez uniquement reprogrammer un cours annulé (statut: Planifié).');
+    }
+
+    if (existing.status === CourseStatusValues.CANCELLED && dto.status === CourseStatusValues.SCHEDULED) {
+      const updated = await client.annualTimetableEntry.update({
+        where: { id: existing.id },
+        data: {
+          status: CourseStatusValues.SCHEDULED,
+          cancelledAt: null,
+          cancelledBy: null,
+          cancellationReason: null,
+        },
+        include: {
+          subject: true,
+          teacher: {
+            include: {
+              teacherProfile: {
+                include: { primarySubject: true },
+              },
+            },
+          },
+          class: { include: this.classInclude() },
+          room: { include: { building: true } },
+          semester: true,
+        },
+      });
+      return this.mapAnnualTimetableEntry(updated);
+    }
+
+    const updated = await client.annualTimetableEntry.update({
+      where: { id: existing.id },
+      data: { status: dto.status as any },
+      include: {
+        subject: true,
+        teacher: {
+          include: {
+            teacherProfile: {
+              include: { primarySubject: true },
+            },
+          },
+        },
+        class: { include: this.classInclude() },
+        room: { include: { building: true } },
+        semester: true,
+      },
+    });
+
+    return this.mapAnnualTimetableEntry(updated);
+  }
+
+  async cancelAnnualTimetableEntry(
+    tenant: ITenant | null,
+    annualTimetableId: string,
+    entryId: string,
+    dto: { reason?: string },
+  ): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+    await this.requireAnnualTimetable(client, schoolId, annualTimetableId);
+    const existing = await this.requireAnnualTimetableEntry(client, schoolId, entryId, annualTimetableId);
+
+    if (existing.status === CourseStatusValues.COMPLETED) {
+      throw new BadRequestException('Impossible d\'annuler un cours déjà terminé.');
+    }
+
+    if (existing.status === CourseStatusValues.CANCELLED) {
+      throw new BadRequestException('Ce cours est déjà annulé.');
+    }
+
+    const updated = await client.annualTimetableEntry.update({
+      where: { id: existing.id },
+      data: {
+        status: CourseStatusValues.CANCELLED,
+        cancelledAt: new Date(),
+        cancellationReason: dto.reason ?? null,
+      },
+      include: {
+        subject: true,
+        teacher: {
+          include: {
+            teacherProfile: {
+              include: { primarySubject: true },
+            },
+          },
+        },
+        class: { include: this.classInclude() },
+        room: { include: { building: true } },
+        semester: true,
+      },
+    });
+
+    return this.mapAnnualTimetableEntry(updated);
   }
 
   async createTimetable(tenant: ITenant | null, dto: CreateTimetableDto): Promise<any> {
@@ -2863,6 +3031,10 @@ export class AcademicService {
       endTime: entry.endTime,
       dateStart: this.toDateOnly(entry.dateStart),
       dateEnd: this.toDateOnly(entry.dateEnd),
+      status: entry.status || 'SCHEDULED',
+      cancelledAt: entry.cancelledAt ? entry.cancelledAt.toISOString() : null,
+      cancelledBy: entry.cancelledBy ?? null,
+      cancellationReason: entry.cancellationReason ?? null,
       subjectId: entry.subjectId,
       subject: {
         id: entry.subject?.id ?? '',

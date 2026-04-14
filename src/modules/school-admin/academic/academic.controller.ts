@@ -63,6 +63,8 @@ import {
   UpdateAnnualTimetableDto,
   UpdateAnnualTimetableEntryDto,
   MigrateAnnualTimetablesDto,
+  UpdateCourseStatusDto,
+  CancelCourseDto,
 } from './academic.dto';
 import { AcademicService } from './academic.service';
 
@@ -563,6 +565,36 @@ export class AcademicController {
     @Req() req: Request,
   ) {
     const data = await this.academicService.deleteAnnualTimetableEntry(tenant, id, entryId);
+    return { data };
+  }
+
+  @Patch('annual-timetables/:id/entries/:entryId/status')
+  @ApiParam({ name: 'id', description: 'Identifiant de l emploi du temps annuel' })
+  @ApiParam({ name: 'entryId', description: 'Identifiant du cours' })
+  @ApiBody({ type: UpdateCourseStatusDto })
+  async updateAnnualTimetableEntryStatus(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Param('entryId') entryId: string,
+    @Body() dto: UpdateCourseStatusDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.updateAnnualTimetableEntryStatus(tenant, id, entryId, dto);
+    return { data };
+  }
+
+  @Post('annual-timetables/:id/entries/:entryId/cancel')
+  @ApiParam({ name: 'id', description: 'Identifiant de l emploi du temps annuel' })
+  @ApiParam({ name: 'entryId', description: 'Identifiant du cours' })
+  @ApiBody({ type: CancelCourseDto })
+  async cancelAnnualTimetableEntry(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Param('entryId') entryId: string,
+    @Body() dto: CancelCourseDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.cancelAnnualTimetableEntry(tenant, id, entryId, dto);
     return { data };
   }
 

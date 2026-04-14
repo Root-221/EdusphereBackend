@@ -454,6 +454,10 @@ model TimetableEntry {
   classId    String
   class      SchoolClass @relation(fields: [classId], references: [id], onDelete: Cascade)
   room       String?
+  status     CourseStatus @default(SCHEDULED)
+  cancelledAt DateTime?
+  cancelledBy String?
+  cancellationReason String?
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 
@@ -503,6 +507,10 @@ model AnnualTimetableEntry {
   endTime           String
   dateStart         DateTime
   dateEnd           DateTime
+  status            CourseStatus @default(SCHEDULED)
+  cancelledAt       DateTime?
+  cancelledBy       String?
+  cancellationReason String?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
@@ -514,6 +522,7 @@ model AnnualTimetableEntry {
   @@index([dayOfWeek])
   @@index([dateStart])
   @@index([dateEnd])
+  @@index([status])
 }
 
 model StaffMember {
@@ -569,4 +578,11 @@ enum RoomType {
   terrain
   sanitaire
   autre
+}
+
+enum CourseStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
 }
