@@ -10,6 +10,7 @@ export interface AuthResponse {
     role: string;
     schoolId: string | null;
     schoolName: string | null;
+    schoolSlug: string | null;
     mustChangePassword: boolean;
   };
 }

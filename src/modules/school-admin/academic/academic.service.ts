@@ -1207,6 +1207,34 @@ export class AcademicService {
 
     await this.generateWeeklyInstances(tenant, startOfWeek.toISOString().split('T')[0]);
 
+    const timetables = await client.annualTimetable.findMany({
+      where: {
+        schoolId,
+        ...(academicYearId ? { academicYearId } : {}),
+        ...(query.classId ? { classId: query.classId } : {}),
+        ...(query.status ? { status: query.status } : {}),
+      },
+      include: {
+        academicYear: true,
+        class: { include: this.classInclude() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const timetablesMap = new Map<string, any>();
+    for (const timetable of timetables) {
+      timetablesMap.set(timetable.id, {
+        id: timetable.id,
+        schoolId: timetable.schoolId,
+        academicYearId: timetable.academicYearId,
+        academicYear: timetable.academicYear,
+        classId: timetable.classId,
+        class: timetable.class,
+        status: timetable.status,
+        entries: [],
+      });
+    }
+
     const instances = await client.weeklyCourseInstance.findMany({
       where: {
         schoolId,
@@ -1218,6 +1246,12 @@ export class AcademicService {
               },
             }
           : {}),
+        annualTimetableEntry: {
+          annualTimetable: {
+             ...(academicYearId ? { academicYearId } : {}),
+             ...(query.status ? { status: query.status } : {}),
+          }
+        }
       },
       include: {
         annualTimetableEntry: {
@@ -1245,24 +1279,11 @@ export class AcademicService {
       },
       orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
     });
-
-    const timetablesMap = new Map<string, any>();
     for (const instance of instances) {
       const entry = instance.annualTimetableEntry;
       if (!entry || !entry.annualTimetable) continue;
       const timetableId = entry.annualTimetable.id;
-      if (!timetablesMap.has(timetableId)) {
-        timetablesMap.set(timetableId, {
-          id: entry.annualTimetable.id,
-          schoolId: entry.annualTimetable.schoolId,
-          academicYearId: entry.annualTimetable.academicYearId,
-          academicYear: entry.annualTimetable.academicYear,
-          classId: entry.annualTimetable.classId,
-          class: entry.annualTimetable.class,
-          status: entry.annualTimetable.status,
-          entries: [],
-        });
-      }
+      if (!timetablesMap.has(timetableId)) continue;
       timetablesMap.get(timetableId).entries.push({
         id: instance.id,
         annualTimetableEntryId: entry.id,
@@ -1292,8 +1313,13 @@ export class AcademicService {
   }
 
   async getAnnualTimetable(tenant: ITenant | null, id: string): Promise<any> {
+    console.log('[getAnnualTimetable] Début - id:', id);
+    console.log('[getAnnualTimetable] Tenant:', tenant);
+    
     const client = await this.getClient(tenant);
     const schoolId = this.requireTenant(tenant).id;
+    console.log('[getAnnualTimetable] schoolId:', schoolId);
+    
     const timetable = await client.annualTimetable.findFirst({
       where: { id, schoolId },
       include: {
@@ -1316,6 +1342,11 @@ export class AcademicService {
         },
       },
     });
+
+    console.log('[getAnnualTimetable] Timetable trouvé:', timetable?.id, 'avec', timetable?.entries?.length, 'entrées');
+    if (timetable?.entries?.length) {
+      console.log('[getAnnualTimetable] IDs des entrées:', timetable.entries.map(e => e.id));
+    }
 
     if (!timetable) {
       throw new NotFoundException('Emploi du temps annuel introuvable');
@@ -1700,11 +1731,42 @@ export class AcademicService {
     annualTimetableId: string,
     entryId: string,
   ): Promise<any> {
+    console.log('[deleteAnnualTimetableEntry] Début - annualTimetableId:', annualTimetableId, 'entryId:', entryId);
+    console.log('[deleteAnnualTimetableEntry] Tenant:', tenant);
+    
     const client = await this.getClient(tenant);
     const schoolId = this.requireTenant(tenant).id;
-    await this.requireAnnualTimetable(client, schoolId, annualTimetableId);
-    const existing = await this.requireAnnualTimetableEntry(client, schoolId, entryId, annualTimetableId);
-    const deleted = await client.annualTimetableEntry.delete({ where: { id: existing.id } });
+    console.log('[deleteAnnualTimetableEntry] schoolId:', schoolId);
+    
+    const timetable = await client.annualTimetable.findFirst({
+      where: { id: annualTimetableId, schoolId },
+    });
+    
+    console.log('[deleteAnnualTimetableEntry] Timetable trouvé:', timetable);
+    
+    if (!timetable) {
+      throw new NotFoundException(`Emploi du temps annuel introuvable (ID: ${annualTimetableId})`);
+    }
+    
+    const entry = await client.annualTimetableEntry.findFirst({
+      where: { 
+        id: entryId, 
+        schoolId,
+      },
+    });
+    
+    console.log('[deleteAnnualTimetableEntry] Entry trouvé:', entry);
+    
+    if (!entry) {
+      throw new NotFoundException(`Cours annuel introuvable (ID: ${entryId})`);
+    }
+    
+    if (entry.annualTimetableId !== annualTimetableId) {
+      throw new BadRequestException('Ce cours appartient à un autre emploi du temps');
+    }
+    
+    const deleted = await client.annualTimetableEntry.delete({ where: { id: entry.id } });
+    console.log('[deleteAnnualTimetableEntry] Supprimé avec succès');
     return {
       id: deleted.id,
       annualTimetableId: deleted.annualTimetableId,
@@ -2223,8 +2285,20 @@ export class AcademicService {
       level: true,
       headTeacher: true,
       students: true,
-      subjectLinks: { include: { subject: true } },
-      teacherLinks: { include: { teacher: { include: { user: true } } } },
+      subjectLinks: { 
+        include: { 
+          subject: true 
+        } 
+      },
+      teacherLinks: { 
+        include: { 
+          teacher: { 
+            include: { 
+              user: true 
+            } 
+          } 
+        } 
+      },
       academicYear: true,
     };
   }
@@ -2391,7 +2465,11 @@ export class AcademicService {
     annualTimetableId: string,
   ): Promise<any> {
     const entry = await client.annualTimetableEntry.findFirst({
-      where: { id, schoolId, annualTimetableId },
+      where: { 
+        id, 
+        schoolId,
+        annualTimetableId 
+      },
       include: {
         subject: true,
         teacher: {
@@ -2408,6 +2486,10 @@ export class AcademicService {
     });
 
     if (!entry) {
+      throw new NotFoundException(`Cours annuel introuvable (ID: ${id})`);
+    }
+
+    if (entry.annualTimetableId !== annualTimetableId) {
       throw new NotFoundException('Cours annuel introuvable');
     }
 
@@ -3225,13 +3307,13 @@ export class AcademicService {
     });
 
     const daysMap: Record<string, number> = {
-      'Dimanche': 0,
-      'Lundi': 1,
-      'Mardi': 2,
-      'Mercredi': 3,
-      'Jeudi': 4,
-      'Vendredi': 5,
-      'Samedi': 6,
+      'Lundi': 0,
+      'Mardi': 1,
+      'Mercredi': 2,
+      'Jeudi': 3,
+      'Vendredi': 4,
+      'Samedi': 5,
+      'Dimanche': 6,
     };
 
     const createdInstances = [];
@@ -3250,6 +3332,19 @@ export class AcademicService {
         const dayIndex = daysMap[entry.dayOfWeek] ?? 1;
         const instanceDate = new Date(startOfWeek);
         instanceDate.setDate(startOfWeek.getDate() + dayIndex);
+        let initialStatus = CourseStatusValues.SCHEDULED;
+        const now = new Date();
+        const todayStr = this.toDateOnly(now);
+        const currentHours = now.getHours().toString().padStart(2, '0');
+        const currentMinutes = now.getMinutes().toString().padStart(2, '0');
+        const currentTime = `${currentHours}:${currentMinutes}`;
+        const instanceDateStr = this.toDateOnly(instanceDate);
+
+        if (instanceDateStr < todayStr || (instanceDateStr === todayStr && entry.endTime <= currentTime)) {
+          initialStatus = CourseStatusValues.COMPLETED;
+        } else if (instanceDateStr === todayStr && entry.startTime <= currentTime && entry.endTime > currentTime) {
+          initialStatus = CourseStatusValues.IN_PROGRESS;
+        }
 
         const instance = await client.weeklyCourseInstance.create({
           data: {
@@ -3260,7 +3355,7 @@ export class AcademicService {
             startTime: entry.startTime,
             endTime: entry.endTime,
             date: instanceDate,
-            status: CourseStatusValues.SCHEDULED,
+            status: initialStatus,
             roomId: entry.roomId,
           },
           include: {

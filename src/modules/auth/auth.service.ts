@@ -343,6 +343,7 @@ async login(loginDto: LoginDto, ipAddress: string, tenant: ITenant | null): Prom
         role: user.role,
         schoolId: tenant?.id ?? null,
         schoolName: tenant?.name ?? null,
+        schoolSlug: tenant?.slug ?? null,
         mustChangePassword: Boolean(user.mustChangePassword),
       },
     };

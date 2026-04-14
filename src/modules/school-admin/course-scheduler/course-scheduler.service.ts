@@ -54,16 +54,16 @@ export class CourseSchedulerService {
 
     try {
       const now = new Date();
-      const currentDayOfWeek = this.getDayOfWeek(now);
       const currentTime = this.formatTime(now);
+      const todayStr = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().split('T')[0];
+      const todayWithTimeAtMidnight = new Date(todayStr + 'T00:00:00.000Z');
 
       await client.$transaction(async (tx: any) => {
-        await tx.annualTimetableEntry.updateMany({
+        // Mark as IN_PROGRESS if date == today and time is within [startTime, endTime[
+        await tx.weeklyCourseInstance.updateMany({
           where: {
             schoolId: tenant.id,
-            dateStart: { lte: now },
-            dateEnd: { gte: now },
-            dayOfWeek: currentDayOfWeek,
+            date: todayWithTimeAtMidnight,
             status: CourseStatusValues.SCHEDULED,
             startTime: { lte: currentTime },
             endTime: { gt: currentTime },
@@ -73,34 +73,24 @@ export class CourseSchedulerService {
           },
         });
 
-        await tx.annualTimetableEntry.updateMany({
+        // Mark as COMPLETED if it's IN_PROGRESS (or somehow still SCHEDULED)
+        // and either date < today OR (date == today AND endTime <= currentTime)
+        await tx.weeklyCourseInstance.updateMany({
           where: {
             schoolId: tenant.id,
-            dateStart: { lte: now },
-            dateEnd: { gte: now },
-            dayOfWeek: currentDayOfWeek,
-            status: CourseStatusValues.IN_PROGRESS,
-            endTime: { lte: currentTime },
+            status: {
+              in: [CourseStatusValues.SCHEDULED, CourseStatusValues.IN_PROGRESS],
+            },
+            OR: [
+              { date: { lt: todayWithTimeAtMidnight } },
+              {
+                date: todayWithTimeAtMidnight,
+                endTime: { lte: currentTime },
+              },
+            ],
           },
           data: {
             status: CourseStatusValues.COMPLETED,
-          },
-        });
-
-        await tx.annualTimetableEntry.updateMany({
-          where: {
-            schoolId: tenant.id,
-            OR: [
-              { dateStart: { gt: now } },
-              { dateEnd: { lt: now } },
-              { dayOfWeek: { not: currentDayOfWeek } },
-            ],
-            status: {
-              in: [CourseStatusValues.IN_PROGRESS, CourseStatusValues.COMPLETED],
-            },
-          },
-          data: {
-            status: CourseStatusValues.SCHEDULED,
           },
         });
       });
