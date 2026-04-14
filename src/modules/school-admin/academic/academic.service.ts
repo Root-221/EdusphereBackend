@@ -3332,7 +3332,7 @@ export class AcademicService {
         const dayIndex = daysMap[entry.dayOfWeek] ?? 1;
         const instanceDate = new Date(startOfWeek);
         instanceDate.setDate(startOfWeek.getDate() + dayIndex);
-        let initialStatus = CourseStatusValues.SCHEDULED;
+        let initialStatus: string = CourseStatusValues.SCHEDULED;
         const now = new Date();
         const todayStr = this.toDateOnly(now);
         const currentHours = now.getHours().toString().padStart(2, '0');
