@@ -18,7 +18,7 @@ export class TeacherService {
     return this.tenantDatabaseService.getClientForTenant(this.requireTenant(tenant));
   }
 
-  private async getDefaultAcademicYearId(client: any, schoolId: string): Promise<string | null> {
+private async getDefaultAcademicYearId(client: any, schoolId: string): Promise<string | null> {
     const active = await client.academicYear.findFirst({
       where: { schoolId, status: 'active' },
       orderBy: { startDate: 'desc' },
@@ -34,14 +34,69 @@ export class TeacherService {
   private async getDefaultSemesterId(client: any, schoolId: string, academicYearId: string): Promise<string | null> {
     const active = await client.semester.findFirst({
       where: { schoolId, academicYearId, status: 'active' },
-      orderBy: { startDate: 'asc' },
+      orderBy: { startDate: 'desc' },
     });
     if (active) return active.id;
-    const first = await client.semester.findFirst({
+    const latest = await client.semester.findFirst({
       where: { schoolId, academicYearId },
-      orderBy: { startDate: 'asc' },
+      orderBy: { startDate: 'desc' },
     });
-    return first?.id ?? null;
+    return latest?.id ?? null;
+  }
+
+  private async ensureWeeklyInstancesForWeek(client: any, schoolId: string, startOfWeek: Date): Promise<void> {
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    const annualEntries = await client.annualTimetableEntry.findMany({
+      where: {
+        schoolId,
+        dateStart: { lte: endOfWeek },
+        dateEnd: { gte: startOfWeek },
+      },
+    });
+
+    const daysMap: Record<string, number> = {
+      'Dimanche': 0,
+      'Lundi': 1,
+      'Mardi': 2,
+      'Mercredi': 3,
+      'Jeudi': 4,
+      'Vendredi': 5,
+      'Samedi': 6,
+    };
+
+    for (const entry of annualEntries) {
+      const existingInstance = await client.weeklyCourseInstance.findUnique({
+        where: {
+          annualTimetableEntryId_weekStartDate: {
+            annualTimetableEntryId: entry.id,
+            weekStartDate: startOfWeek,
+          },
+        },
+      });
+
+      if (!existingInstance) {
+        const dayIndex = daysMap[entry.dayOfWeek] ?? 1;
+        const instanceDate = new Date(startOfWeek);
+        instanceDate.setDate(startOfWeek.getDate() + dayIndex);
+
+        await client.weeklyCourseInstance.create({
+          data: {
+            schoolId,
+            annualTimetableEntryId: entry.id,
+            weekStartDate: startOfWeek,
+            dayOfWeek: entry.dayOfWeek,
+            startTime: entry.startTime,
+            endTime: entry.endTime,
+            date: instanceDate,
+            status: CourseStatusValues.SCHEDULED,
+            roomId: entry.roomId,
+          },
+        });
+      }
+    }
   }
 
   async getTeacherClassesOptions(tenant: ITenant | null, teacherId: string): Promise<any> {
@@ -290,11 +345,9 @@ export class TeacherService {
   async listTeacherTimetableEntries(tenant: ITenant | null, teacherId: string, query: any = {}): Promise<any[]> {
     const client = await this.getClient(tenant);
     const schoolId = this.requireTenant(tenant).id;
+    
     const academicYearId =
       query.academicYearId ?? (await this.getDefaultAcademicYearId(client, schoolId));
-    const semesterId =
-      query.semesterId ??
-      (academicYearId ? await this.getDefaultSemesterId(client, schoolId, academicYearId) : null);
 
     let startOfWeek: Date;
     if (query.weekStartDate) {
@@ -311,65 +364,76 @@ export class TeacherService {
     endOfWeek.setDate(startOfWeek.getDate() + 6);
     endOfWeek.setHours(23, 59, 59, 999);
 
-    await client.annualTimetableEntry.updateMany({
-      where: {
-        schoolId,
-        teacherId,
-        status: { in: ['IN_PROGRESS', 'COMPLETED'] },
-        dateStart: { lte: endOfWeek },
-        dateEnd: { gte: startOfWeek },
-      },
-      data: { status: 'SCHEDULED' },
-    });
+    await this.ensureWeeklyInstancesForWeek(client, schoolId, startOfWeek);
 
-    const entries = await client.annualTimetableEntry.findMany({
+    const allInstances = await client.weeklyCourseInstance.findMany({
       where: {
         schoolId,
-        teacherId,
-        ...(query.classId ? { classId: query.classId } : {}),
-        ...(semesterId ? { semesterId } : {}),
-        ...(academicYearId ? { annualTimetable: { academicYearId } } : {}),
+        weekStartDate: startOfWeek,
       },
       include: {
-        subject: true,
-        class: { include: { level: true, academicYear: true } },
-        room: { include: { building: true } },
-        semester: true,
-        annualTimetable: { include: { academicYear: true } },
+        annualTimetableEntry: true,
       },
-      orderBy: [{ dayOfWeek: 'asc' }, { startTime: 'asc' }],
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
     });
 
-    return entries.map((entry: any) => ({
-      id: entry.id,
-      dayOfWeek: entry.dayOfWeek,
-      startTime: entry.startTime,
-      endTime: entry.endTime,
-      dateStart: entry.dateStart,
-      dateEnd: entry.dateEnd,
-      status: entry.status || 'SCHEDULED',
-      cancelledAt: entry.cancelledAt ? entry.cancelledAt.toISOString() : null,
-      cancellationReason: entry.cancellationReason ?? null,
+    let instances = allInstances.filter((i: any) => i.annualTimetableEntry?.teacherId === teacherId);
+
+    if (query.classId && query.classId !== 'all') {
+      instances = instances.filter((i: any) => i.annualTimetableEntry?.classId === query.classId);
+    }
+
+    const fullInstances = await client.weeklyCourseInstance.findMany({
+      where: {
+        id: { in: instances.map((i: any) => i.id) },
+      },
+      include: {
+        annualTimetableEntry: {
+          include: {
+            subject: true,
+            class: { include: { level: true, academicYear: true } },
+            room: { include: { building: true } },
+            semester: true,
+            annualTimetable: { include: { academicYear: true } },
+          },
+        },
+        room: { include: { building: true } },
+      },
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+    });
+
+    return fullInstances.map((instance: any) => ({
+      id: instance.id,
+      dayOfWeek: instance.dayOfWeek,
+      startTime: instance.startTime,
+      endTime: instance.endTime,
+      dateStart: instance.annualTimetableEntry?.dateStart,
+      dateEnd: instance.annualTimetableEntry?.dateEnd,
+      date: instance.date,
+      status: instance.status || 'SCHEDULED',
+      cancelledAt: instance.cancelledAt ? instance.cancelledAt.toISOString() : null,
+      cancellationReason: instance.cancellationReason ?? null,
       subject: {
-        id: entry.subject?.id ?? '',
-        name: entry.subject?.name ?? '',
+        id: instance.annualTimetableEntry?.subject?.id ?? '',
+        name: instance.annualTimetableEntry?.subject?.name ?? '',
       },
+      teacherId: instance.annualTimetableEntry?.teacherId ?? teacherId,
       class: {
-        id: entry.class?.id ?? '',
-        name: entry.class?.name ?? '',
-        level: entry.class?.level?.name ?? '',
+        id: instance.annualTimetableEntry?.class?.id ?? '',
+        name: instance.annualTimetableEntry?.class?.name ?? '',
+        level: instance.annualTimetableEntry?.class?.level?.name ?? '',
       },
-      room: entry.room
+      room: instance.room
         ? {
-            id: entry.room.id,
-            name: entry.room.name,
-            buildingName: entry.room.building?.name ?? '',
+            id: instance.room.id,
+            name: instance.room.name,
+            buildingName: instance.room.building?.name ?? '',
           }
         : null,
-      semesterId: entry.semesterId ?? '',
-      semesterName: entry.semester?.name ?? '',
-      academicYearId: entry.annualTimetable?.academicYearId ?? entry.class?.academicYearId ?? '',
-      academicYearName: entry.annualTimetable?.academicYear?.name ?? entry.class?.academicYear?.name ?? '',
+      semesterId: instance.annualTimetableEntry?.semesterId ?? '',
+      semesterName: instance.annualTimetableEntry?.semester?.name ?? '',
+      academicYearId: instance.annualTimetableEntry?.annualTimetable?.academicYearId ?? instance.annualTimetableEntry?.class?.academicYearId ?? '',
+      academicYearName: instance.annualTimetableEntry?.annualTimetable?.academicYear?.name ?? instance.annualTimetableEntry?.class?.academicYear?.name ?? '',
     }));
   }
 
@@ -382,34 +446,35 @@ export class TeacherService {
     const client = await this.getClient(tenant);
     const schoolId = this.requireTenant(tenant).id;
 
-    const entry = await client.annualTimetableEntry.findFirst({
-      where: { id: courseId, schoolId, teacherId },
+    const instance = await client.weeklyCourseInstance.findFirst({
+      where: { 
+        id: courseId, 
+        schoolId,
+        annualTimetableEntry: { teacherId },
+      },
+      include: {
+        annualTimetableEntry: true,
+      },
     });
 
-    if (!entry) {
+    if (!instance) {
       throw new NotFoundException('Cours introuvable ou vous n\'êtes pas autorisé à annuler ce cours.');
     }
 
-    if (entry.status === CourseStatusValues.CANCELLED) {
+    if (instance.status === CourseStatusValues.CANCELLED) {
       throw new BadRequestException('Ce cours est déjà annulé.');
     }
 
-    if (entry.status === CourseStatusValues.COMPLETED) {
+    if (instance.status === CourseStatusValues.COMPLETED) {
       throw new BadRequestException('Impossible d\'annuler un cours déjà terminé.');
     }
 
-    const updated = await client.annualTimetableEntry.update({
+    const updated = await client.weeklyCourseInstance.update({
       where: { id: courseId },
       data: {
         status: CourseStatusValues.CANCELLED,
         cancelledAt: new Date(),
         cancellationReason: dto.reason ?? null,
-      },
-      include: {
-        subject: true,
-        class: { include: { level: true } },
-        room: { include: { building: true } },
-        semester: true,
       },
     });
 

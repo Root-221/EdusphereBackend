@@ -179,6 +179,7 @@ model Room {
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
   annualTimetableEntries AnnualTimetableEntry[]
+  weeklyInstances WeeklyCourseInstance[]
 
   @@index([schoolId])
   @@index([buildingId])
@@ -513,6 +514,7 @@ model AnnualTimetableEntry {
   cancellationReason String?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
+  weeklyInstances   WeeklyCourseInstance[]
 
   @@index([schoolId])
   @@index([annualTimetableId])
@@ -522,6 +524,32 @@ model AnnualTimetableEntry {
   @@index([dayOfWeek])
   @@index([dateStart])
   @@index([dateEnd])
+  @@index([status])
+}
+
+model WeeklyCourseInstance {
+  id                    String    @id @default(cuid())
+  schoolId              String
+  annualTimetableEntryId String
+  annualTimetableEntry   AnnualTimetableEntry @relation(fields: [annualTimetableEntryId], references: [id], onDelete: Cascade)
+  weekStartDate         DateTime
+  dayOfWeek             String
+  startTime             String
+  endTime               String
+  date                  DateTime
+  status                CourseStatus @default(SCHEDULED)
+  cancelledAt           DateTime?
+  cancellationReason    String?
+  roomId                String?
+  room                  Room?      @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  @@unique([annualTimetableEntryId, weekStartDate])
+  @@index([schoolId])
+  @@index([weekStartDate])
+  @@index([dayOfWeek])
+  @@index([date])
   @@index([status])
 }
 

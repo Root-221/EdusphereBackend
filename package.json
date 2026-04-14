@@ -23,6 +23,8 @@
     "db:reset:central": "prisma migrate reset --schema prisma/schema.prisma",
     "db:deploy:central": "prisma migrate deploy --schema prisma/schema.prisma",
     "db:deploy:tenant": "node -e \"const { spawnSync } = require('child_process'); const url = process.env.TENANT_DATABASE_URL; if (!url) { console.error('Set TENANT_DATABASE_URL before running db:deploy:tenant'); process.exit(1); } const result = spawnSync('npx', ['prisma', 'migrate', 'deploy', '--schema', 'prisma/tenant/schema.prisma'], { stdio: 'inherit', env: { ...process.env, DATABASE_URL: url } }); process.exit(result.status ?? 1);\"",
+    "db:push:all": "node scripts/push-schema-all-tenants.js",
+    "db:push:all:force": "node scripts/push-schema-all-tenants.js --force",
     "db:seed": "prisma db seed",
     "db:studio": "prisma studio"
   },

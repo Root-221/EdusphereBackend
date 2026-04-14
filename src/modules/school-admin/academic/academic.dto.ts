@@ -536,3 +536,40 @@ export class CancelCourseDto {
   @IsString()
   reason?: string;
 }
+
+export class GenerateWeeklyInstancesDto {
+  @ApiProperty({ example: '2026-04-13' })
+  @IsDateString()
+  weekStartDate: string;
+}
+
+export class UpdateWeeklyInstanceDto {
+  @ApiPropertyOptional({ enum: CourseStatusValues })
+  @IsOptional()
+  @IsEnum(CourseStatusValues)
+  status?: CourseStatus;
+
+  @ApiPropertyOptional({ example: 'cmbx123room01' })
+  @IsOptional()
+  @IsString()
+  roomId?: string;
+}
+
+export class CancelWeeklyInstanceDto {
+  @ApiPropertyOptional({ example: 'Raison de l\'annulation' })
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
+export class ListWeeklyInstancesQueryDto {
+  @ApiPropertyOptional({ example: '2026-04-13' })
+  @IsOptional()
+  @IsString()
+  weekStartDate?: string;
+
+  @ApiPropertyOptional({ example: 'cmbx123class01' })
+  @IsOptional()
+  @IsString()
+  classId?: string;
+}

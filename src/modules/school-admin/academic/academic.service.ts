@@ -1186,35 +1186,6 @@ export class AcademicService {
     const academicYearId =
       query.academicYearId ?? (await this.getDefaultAcademicYearId(client, schoolId));
 
-    const timetables = await client.annualTimetable.findMany({
-      where: {
-        schoolId,
-        ...(academicYearId ? { academicYearId } : {}),
-        ...(query.classId ? { classId: query.classId } : {}),
-        ...(query.status ? { status: query.status } : {}),
-      },
-      include: {
-        academicYear: true,
-        class: { include: this.classInclude() },
-        entries: {
-          include: {
-            subject: true,
-            teacher: {
-              include: {
-                teacherProfile: {
-                  include: { primarySubject: true },
-                },
-              },
-            },
-            class: { include: this.classInclude() },
-            room: { include: { building: true } },
-            semester: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
     let startOfWeek: Date;
     let endOfWeek: Date;
 
@@ -1234,21 +1205,90 @@ export class AcademicService {
       endOfWeek.setHours(23, 59, 59, 999);
     }
 
-    for (const timetable of timetables) {
-      await client.annualTimetableEntry.updateMany({
-        where: {
-          annualTimetableId: timetable.id,
-          status: { in: [CourseStatusValues.IN_PROGRESS, CourseStatusValues.COMPLETED] },
-          dateStart: { lte: endOfWeek },
-          dateEnd: { gte: startOfWeek },
+    await this.generateWeeklyInstances(tenant, startOfWeek.toISOString().split('T')[0]);
+
+    const instances = await client.weeklyCourseInstance.findMany({
+      where: {
+        schoolId,
+        weekStartDate: startOfWeek,
+        ...(query.classId
+          ? {
+              annualTimetableEntry: {
+                classId: query.classId,
+              },
+            }
+          : {}),
+      },
+      include: {
+        annualTimetableEntry: {
+          include: {
+            subject: true,
+            teacher: {
+              include: {
+                teacherProfile: {
+                  include: { primarySubject: true },
+                },
+              },
+            },
+            class: { include: this.classInclude() },
+            room: { include: { building: true } },
+            semester: true,
+            annualTimetable: {
+              include: {
+                academicYear: true,
+                class: { include: this.classInclude() },
+              },
+            },
+          },
         },
-        data: {
-          status: CourseStatusValues.SCHEDULED,
-        },
+        room: { include: { building: true } },
+      },
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+    });
+
+    const timetablesMap = new Map<string, any>();
+    for (const instance of instances) {
+      const entry = instance.annualTimetableEntry;
+      if (!entry || !entry.annualTimetable) continue;
+      const timetableId = entry.annualTimetable.id;
+      if (!timetablesMap.has(timetableId)) {
+        timetablesMap.set(timetableId, {
+          id: entry.annualTimetable.id,
+          schoolId: entry.annualTimetable.schoolId,
+          academicYearId: entry.annualTimetable.academicYearId,
+          academicYear: entry.annualTimetable.academicYear,
+          classId: entry.annualTimetable.classId,
+          class: entry.annualTimetable.class,
+          status: entry.annualTimetable.status,
+          entries: [],
+        });
+      }
+      timetablesMap.get(timetableId).entries.push({
+        id: instance.id,
+        annualTimetableEntryId: entry.id,
+        dayOfWeek: instance.dayOfWeek,
+        startTime: instance.startTime,
+        endTime: instance.endTime,
+        dateStart: entry.dateStart,
+        dateEnd: entry.dateEnd,
+        date: instance.date,
+        status: instance.status,
+        cancelledAt: instance.cancelledAt,
+        cancellationReason: instance.cancellationReason,
+        roomId: instance.roomId,
+        room: instance.room,
+        subjectId: entry.subjectId,
+        subject: entry.subject,
+        teacherId: entry.teacherId,
+        teacher: entry.teacher,
+        classId: entry.classId,
+        class: entry.class,
+        semesterId: entry.semesterId,
+        semester: entry.semester,
       });
     }
 
-    return timetables.map((timetable: any) => this.mapAnnualTimetable(timetable));
+    return Array.from(timetablesMap.values());
   }
 
   async getAnnualTimetable(tenant: ITenant | null, id: string): Promise<any> {
@@ -3154,5 +3194,271 @@ export class AcademicService {
 
     const date = value instanceof Date ? value : new Date(value);
     return date.toISOString().slice(0, 10);
+  }
+
+  async generateWeeklyInstances(
+    tenant: ITenant | null,
+    weekStartDate: string,
+  ): Promise<any[]> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+
+    const startOfWeek = new Date(weekStartDate);
+    startOfWeek.setHours(0, 0, 0, 0);
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setDate(startOfWeek.getDate() + 6);
+    endOfWeek.setHours(23, 59, 59, 999);
+
+    const annualEntries = await client.annualTimetableEntry.findMany({
+      where: {
+        schoolId,
+        dateStart: { lte: endOfWeek },
+        dateEnd: { gte: startOfWeek },
+      },
+      include: {
+        subject: true,
+        teacher: { include: { teacherProfile: true } },
+        class: { include: { level: true } },
+        room: { include: { building: true } },
+        semester: true,
+      },
+    });
+
+    const daysMap: Record<string, number> = {
+      'Dimanche': 0,
+      'Lundi': 1,
+      'Mardi': 2,
+      'Mercredi': 3,
+      'Jeudi': 4,
+      'Vendredi': 5,
+      'Samedi': 6,
+    };
+
+    const createdInstances = [];
+
+    for (const entry of annualEntries) {
+      const existingInstance = await client.weeklyCourseInstance.findUnique({
+        where: {
+          annualTimetableEntryId_weekStartDate: {
+            annualTimetableEntryId: entry.id,
+            weekStartDate: startOfWeek,
+          },
+        },
+      });
+
+      if (!existingInstance) {
+        const dayIndex = daysMap[entry.dayOfWeek] ?? 1;
+        const instanceDate = new Date(startOfWeek);
+        instanceDate.setDate(startOfWeek.getDate() + dayIndex);
+
+        const instance = await client.weeklyCourseInstance.create({
+          data: {
+            schoolId,
+            annualTimetableEntryId: entry.id,
+            weekStartDate: startOfWeek,
+            dayOfWeek: entry.dayOfWeek,
+            startTime: entry.startTime,
+            endTime: entry.endTime,
+            date: instanceDate,
+            status: CourseStatusValues.SCHEDULED,
+            roomId: entry.roomId,
+          },
+          include: {
+            room: { include: { building: true } },
+          },
+        });
+
+        createdInstances.push({
+          ...instance,
+          subject: entry.subject,
+          teacher: entry.teacher,
+          class: entry.class,
+          semester: entry.semester,
+        });
+      }
+    }
+
+    return createdInstances;
+  }
+
+  async listWeeklyInstances(
+    tenant: ITenant | null,
+    weekStartDate: string,
+    classId?: string,
+  ): Promise<any[]> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+
+    const startOfWeek = new Date(weekStartDate);
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const where: any = {
+      schoolId,
+      weekStartDate: startOfWeek,
+    };
+
+    if (classId) {
+      where.annualTimetableEntry = { classId };
+    }
+
+    const instances = await client.weeklyCourseInstance.findMany({
+      where,
+      include: {
+        annualTimetableEntry: {
+          include: {
+            subject: true,
+            teacher: { include: { teacherProfile: true } },
+            class: { include: { level: true } },
+            semester: true,
+          },
+        },
+        room: { include: { building: true } },
+      },
+      orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
+    });
+
+    return instances.map((instance: any) => ({
+      id: instance.id,
+      weekStartDate: instance.weekStartDate,
+      dayOfWeek: instance.dayOfWeek,
+      startTime: instance.startTime,
+      endTime: instance.endTime,
+      date: instance.date,
+      status: instance.status,
+      cancelledAt: instance.cancelledAt,
+      cancellationReason: instance.cancellationReason,
+      roomId: instance.roomId,
+      room: instance.room,
+      annualTimetableEntryId: instance.annualTimetableEntryId,
+      subject: instance.annualTimetableEntry?.subject,
+      teacher: instance.annualTimetableEntry?.teacher,
+      class: instance.annualTimetableEntry?.class,
+      semester: instance.annualTimetableEntry?.semester,
+    }));
+  }
+
+  async updateWeeklyInstanceStatus(
+    tenant: ITenant | null,
+    instanceId: string,
+    dto: { status?: string; roomId?: string },
+  ): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+
+    const instance = await client.weeklyCourseInstance.findFirst({
+      where: { id: instanceId, schoolId },
+    });
+
+    if (!instance) {
+      throw new NotFoundException('Instance de cours hebdomadaire introuvable');
+    }
+
+    const updateData: any = {};
+    if (dto.status) {
+      updateData.status = dto.status;
+    }
+    if (dto.roomId !== undefined) {
+      updateData.roomId = dto.roomId;
+    }
+
+    const updated = await client.weeklyCourseInstance.update({
+      where: { id: instanceId },
+      data: updateData,
+      include: {
+        room: { include: { building: true } },
+        annualTimetableEntry: {
+          include: {
+            subject: true,
+            teacher: { include: { teacherProfile: true } },
+            class: { include: { level: true } },
+          },
+        },
+      },
+    });
+
+    return updated;
+  }
+
+  async updateWeeklyInstance(
+    tenant: ITenant | null,
+    instanceId: string,
+    dto: { startTime?: string; endTime?: string; dayOfWeek?: string; date?: string; roomId?: string },
+  ): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+
+    const instance = await client.weeklyCourseInstance.findFirst({
+      where: { id: instanceId, schoolId },
+    });
+
+    if (!instance) {
+      throw new NotFoundException('Instance de cours hebdomadaire introuvable');
+    }
+
+    const updateData: any = {};
+    if (dto.startTime) updateData.startTime = dto.startTime;
+    if (dto.endTime) updateData.endTime = dto.endTime;
+    if (dto.dayOfWeek) updateData.dayOfWeek = dto.dayOfWeek;
+    if (dto.date) updateData.date = new Date(dto.date);
+    if (dto.roomId !== undefined) updateData.roomId = dto.roomId;
+
+    const updated = await client.weeklyCourseInstance.update({
+      where: { id: instanceId },
+      data: updateData,
+      include: {
+        room: { include: { building: true } },
+        annualTimetableEntry: {
+          include: {
+            subject: true,
+            teacher: { include: { teacherProfile: true } },
+            class: { include: { level: true } },
+          },
+        },
+      },
+    });
+
+    return updated;
+  }
+
+  async cancelWeeklyInstance(
+    tenant: ITenant | null,
+    instanceId: string,
+    dto: { reason?: string },
+  ): Promise<any> {
+    const client = await this.getClient(tenant);
+    const schoolId = this.requireTenant(tenant).id;
+
+    const instance = await client.weeklyCourseInstance.findFirst({
+      where: { id: instanceId, schoolId },
+    });
+
+    if (!instance) {
+      throw new NotFoundException('Instance de cours hebdomadaire introuvable');
+    }
+
+    if (instance.status === CourseStatusValues.CANCELLED) {
+      throw new BadRequestException('Cette instance est déjà annulée');
+    }
+
+    const updated = await client.weeklyCourseInstance.update({
+      where: { id: instanceId },
+      data: {
+        status: CourseStatusValues.CANCELLED,
+        cancelledAt: new Date(),
+        cancellationReason: dto.reason ?? null,
+      },
+      include: {
+        room: { include: { building: true } },
+        annualTimetableEntry: {
+          include: {
+            subject: true,
+            teacher: { include: { teacherProfile: true } },
+            class: { include: { level: true } },
+          },
+        },
+      },
+    });
+
+    return updated;
   }
 }

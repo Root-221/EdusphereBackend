@@ -65,6 +65,10 @@ import {
   MigrateAnnualTimetablesDto,
   UpdateCourseStatusDto,
   CancelCourseDto,
+  GenerateWeeklyInstancesDto,
+  ListWeeklyInstancesQueryDto,
+  UpdateWeeklyInstanceDto,
+  CancelWeeklyInstanceDto,
 } from './academic.dto';
 import { AcademicService } from './academic.service';
 
@@ -715,6 +719,70 @@ export class AcademicController {
     @Req() req: Request,
   ) {
     const data = await this.academicService.deleteTimetableEntry(tenant, id, entryId);
+    return { data };
+  }
+
+  @Post('weekly-instances/generate')
+  @ApiOperation({ summary: 'Générer les instances hebdomadaires pour une semaine' })
+  @ApiBody({ type: GenerateWeeklyInstancesDto })
+  async generateWeeklyInstances(
+    @CurrentTenant() tenant: ITenant | null,
+    @Body() dto: GenerateWeeklyInstancesDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.generateWeeklyInstances(tenant, dto.weekStartDate);
+    return { data };
+  }
+
+  @Get('weekly-instances')
+  @ApiOperation({ summary: 'Lister les instances hebdomadaires' })
+  async listWeeklyInstances(
+    @CurrentTenant() tenant: ITenant | null,
+    @Query() query: ListWeeklyInstancesQueryDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.listWeeklyInstances(tenant, query.weekStartDate, query.classId);
+    return { data };
+  }
+
+  @Patch('weekly-instances/:id/status')
+  @ApiOperation({ summary: 'Mettre à jour le statut d\'une instance hebdomadaire' })
+  @ApiParam({ name: 'id', description: 'Identifiant de l\'instance' })
+  @ApiBody({ type: UpdateWeeklyInstanceDto })
+  async updateWeeklyInstanceStatus(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Body() dto: UpdateWeeklyInstanceDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.updateWeeklyInstanceStatus(tenant, id, dto);
+    return { data };
+  }
+
+  @Patch('weekly-instances/:id')
+  @ApiOperation({ summary: 'Mettre à jour une instance hebdomadaire' })
+  @ApiParam({ name: 'id', description: 'Identifiant de l\'instance' })
+  async updateWeeklyInstance(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Body() dto: any,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.updateWeeklyInstance(tenant, id, dto);
+    return { data };
+  }
+
+  @Post('weekly-instances/:id/cancel')
+  @ApiOperation({ summary: 'Annuler une instance hebdomadaire' })
+  @ApiParam({ name: 'id', description: 'Identifiant de l\'instance' })
+  @ApiBody({ type: CancelWeeklyInstanceDto })
+  async cancelWeeklyInstance(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+    @Body() dto: CancelWeeklyInstanceDto,
+    @Req() req: Request,
+  ) {
+    const data = await this.academicService.cancelWeeklyInstance(tenant, id, dto);
     return { data };
   }
 }
