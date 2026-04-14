@@ -14,6 +14,7 @@ import { TeacherModule } from '@modules/teacher/teacher.module';
 import { CourseSchedulerModule } from '@modules/school-admin/course-scheduler/course-scheduler.module';
 import { StudentModule } from '@modules/student/student.module';
 import { ParentModule } from '@modules/parent/parent.module';
+import { RealtimeModule } from '@modules/realtime/realtime.module';
 import { HealthController } from './app/health.controller';
 import { RootController } from './app/root.controller';
 import { TenantMiddleware } from '@common/middleware/tenant.middleware';
@@ -45,6 +46,7 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
     CourseSchedulerModule,
     StudentModule,
     ParentModule,
+    RealtimeModule,
   ],
   controllers: [HealthController, RootController],
 })

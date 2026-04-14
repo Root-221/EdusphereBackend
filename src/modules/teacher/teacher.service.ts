@@ -3,9 +3,14 @@ import { TenantDatabaseService } from '@database/tenant-database.service';
 import { ITenant } from '@common/interfaces/tenant.interface';
 import { CourseStatusValues } from '../school-admin/academic/academic.dto';
 
+import { TimetableGateway } from '@modules/realtime/timetable.gateway';
+
 @Injectable()
 export class TeacherService {
-  constructor(private readonly tenantDatabaseService: TenantDatabaseService) {}
+  constructor(
+    private readonly tenantDatabaseService: TenantDatabaseService,
+    private readonly timetableGateway: TimetableGateway,
+  ) {}
 
   private requireTenant(tenant: ITenant | null): ITenant {
     if (!tenant) {
@@ -477,6 +482,8 @@ private async getDefaultAcademicYearId(client: any, schoolId: string): Promise<s
         cancellationReason: dto.reason ?? null,
       },
     });
+
+    this.timetableGateway.notifyTimetableUpdate(schoolId);
 
     return {
       id: updated.id,

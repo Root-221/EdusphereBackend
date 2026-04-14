@@ -271,6 +271,8 @@ export class StudentService {
       semester: {
         id: semester?.id ?? '',
         name: semester?.name ?? '',
+        startDate: semester?.startDate,
+        endDate: semester?.endDate,
       },
       class: {
         id: schoolClass?.id ?? '',

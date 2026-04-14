@@ -64,9 +64,14 @@ const DEFAULT_TIME_SLOTS = [
   { name: '10ème créneau', startTime: '17:30', endTime: '18:30' },
 ];
 
+import { TimetableGateway } from '@modules/realtime/timetable.gateway';
+
 @Injectable()
 export class AcademicService {
-  constructor(private readonly tenantDatabaseService: TenantDatabaseService) {}
+  constructor(
+    private readonly tenantDatabaseService: TenantDatabaseService,
+    private readonly timetableGateway: TimetableGateway,
+  ) {}
 
   async listAcademicYears(tenant: ITenant | null): Promise<any[]> {
     const client = await this.getClient(tenant);
@@ -1566,7 +1571,9 @@ export class AcademicService {
 
     await client.annualTimetable.delete({ where: { id } });
 
-    return this.mapAnnualTimetable(existing);
+    const mappedEntry = this.mapAnnualTimetable(existing);
+    this.timetableGateway.notifyTimetableUpdate(schoolId);
+    return mappedEntry;
   }
 
   async createAnnualTimetableEntry(
@@ -1641,7 +1648,9 @@ export class AcademicService {
       },
     });
 
-    return this.mapAnnualTimetableEntry(created);
+    const mappedEntry = this.mapAnnualTimetableEntry(created);
+    this.timetableGateway.notifyTimetableUpdate(schoolId);
+    return mappedEntry;
   }
 
   async updateAnnualTimetableEntry(
@@ -3470,6 +3479,8 @@ export class AcademicService {
         },
       },
     });
+
+    this.timetableGateway.notifyTimetableUpdate(schoolId);
 
     return updated;
   }

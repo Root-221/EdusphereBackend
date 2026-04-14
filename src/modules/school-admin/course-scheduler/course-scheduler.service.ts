@@ -4,6 +4,7 @@ import { PrismaService } from '@database/prisma.service';
 import { TenantDatabaseService } from '@database/tenant-database.service';
 import { ITenant } from '@common/interfaces/tenant.interface';
 import { CourseStatusValues } from '../academic/academic.dto';
+import { TimetableGateway } from '@modules/realtime/timetable.gateway';
 
 @Injectable()
 export class CourseSchedulerService {
@@ -12,6 +13,7 @@ export class CourseSchedulerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tenantDatabaseService: TenantDatabaseService,
+    private readonly timetableGateway: TimetableGateway,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -58,9 +60,11 @@ export class CourseSchedulerService {
       const todayStr = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().split('T')[0];
       const todayWithTimeAtMidnight = new Date(todayStr + 'T00:00:00.000Z');
 
+      let updatedAny = false;
+
       await client.$transaction(async (tx: any) => {
         // Mark as IN_PROGRESS if date == today and time is within [startTime, endTime[
-        await tx.weeklyCourseInstance.updateMany({
+        const resultInProgress = await tx.weeklyCourseInstance.updateMany({
           where: {
             schoolId: tenant.id,
             date: todayWithTimeAtMidnight,
@@ -72,10 +76,11 @@ export class CourseSchedulerService {
             status: CourseStatusValues.IN_PROGRESS,
           },
         });
+        if (resultInProgress.count > 0) updatedAny = true;
 
         // Mark as COMPLETED if it's IN_PROGRESS (or somehow still SCHEDULED)
         // and either date < today OR (date == today AND endTime <= currentTime)
-        await tx.weeklyCourseInstance.updateMany({
+        const resultCompleted = await tx.weeklyCourseInstance.updateMany({
           where: {
             schoolId: tenant.id,
             status: {
@@ -93,7 +98,12 @@ export class CourseSchedulerService {
             status: CourseStatusValues.COMPLETED,
           },
         });
+        if (resultCompleted.count > 0) updatedAny = true;
       });
+
+      if (updatedAny) {
+        this.timetableGateway.notifyTimetableUpdate(tenant.id);
+      }
     } catch (error: any) {
       if (error.code === 'P2025' || error.message?.includes('does not exist')) {
         this.logger.debug(`Schema not yet migrated for school ${tenant.id}, skipping`);
