@@ -77,20 +77,29 @@ model AcademicYear {
 }
 
 model Level {
-  id          String       @id @default(cuid())
-  schoolId    String
-  name        String
-  description String?
-  sortOrder   Int          @default(0)
-  status      String       @default("active")
-  classes     SchoolClass[]
-  enrollments Enrollment[]
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  id              String       @id @default(cuid())
+  schoolId        String
+  name            String
+  description     String?
+  sortOrder       Int          @default(0)
+  enrollmentFee   Float        @default(0)
+  reEnrollmentFee Float        @default(0)
+  status          String       @default("active")
+  
+  // Progression scolaire
+  nextLevelId     String?      @unique
+  nextLevel       Level?       @relation("LevelProgression", fields: [nextLevelId], references: [id])
+  previousLevel   Level?       @relation("LevelProgression")
+
+  classes         SchoolClass[]
+  enrollments     Enrollment[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   @@index([schoolId])
   @@index([status])
   @@index([sortOrder])
+  @@index([nextLevelId])
   @@unique([schoolId, name])
 }
 

@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { TenantDatabaseService } from '@database/tenant-database.service';
 import { ITenant } from '@common/interfaces/tenant.interface';
+import { getStartOfWeek, parseWeekStart, getDateFromDayName } from '@common/utils/date-utils';
 
 @Injectable()
 export class StudentService {
@@ -185,12 +186,9 @@ export class StudentService {
     let startOfWeek: Date;
     
     if (weekStartDate) {
-      startOfWeek = new Date(weekStartDate);
-      startOfWeek.setHours(0, 0, 0, 0);
+      startOfWeek = parseWeekStart(weekStartDate);
     } else {
-      startOfWeek = new Date(now);
-      startOfWeek.setDate(now.getDate() - now.getDay() + 1);
-      startOfWeek.setHours(0, 0, 0, 0);
+      startOfWeek = getStartOfWeek(now);
     }
     
     const weekStartDateStr = startOfWeek.toISOString().split('T')[0];
@@ -297,16 +295,6 @@ export class StudentService {
       },
     });
 
-    const daysMap: Record<string, number> = {
-      'Lundi': 0,
-      'Mardi': 1,
-      'Mercredi': 2,
-      'Jeudi': 3,
-      'Vendredi': 4,
-      'Samedi': 5,
-      'Dimanche': 6,
-    };
-
     for (const entry of annualEntries) {
       const existingInstance = await client.weeklyCourseInstance.findUnique({
         where: {
@@ -317,10 +305,21 @@ export class StudentService {
         },
       });
 
-      if (!existingInstance) {
-        const dayIndex = daysMap[entry.dayOfWeek] ?? 1;
-        const instanceDate = new Date(startOfWeek);
-        instanceDate.setDate(startOfWeek.getDate() + dayIndex);
+      if (existingInstance) {
+        const correctDate = getDateFromDayName(startOfWeek, entry.dayOfWeek);
+        const existingDateStr = existingInstance.date instanceof Date 
+          ? existingInstance.date.toISOString().split('T')[0] 
+          : new Date(existingInstance.date).toISOString().split('T')[0];
+        const correctDateStr = correctDate.toISOString().split('T')[0];
+
+        if (existingDateStr !== correctDateStr) {
+          await client.weeklyCourseInstance.update({
+            where: { id: existingInstance.id },
+            data: { date: correctDate },
+          });
+        }
+      } else {
+        const instanceDate = getDateFromDayName(startOfWeek, entry.dayOfWeek);
 
         await client.weeklyCourseInstance.create({
           data: {

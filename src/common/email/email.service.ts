@@ -139,13 +139,7 @@ export class EmailService {
     accountLabel: string;
     login: string;
     password: string;
-    matricule: string;
-    enrollmentNumber: string;
-    receiptNumber: string;
-    amount: number;
-    academicYear: string;
-    semester: string;
-    className: string;
+    [keys: string]: any; // Allow spreading baseParams without TS error
   }): Promise<EmailSendResult> {
     const tenantUrl = this.buildTenantUrl(params.tenantSlug);
     const recipientName = params.firstName?.trim() || 'Utilisateur';
@@ -163,14 +157,7 @@ export class EmailService {
         { label: 'École', value: params.schoolName },
         { label: 'URL de connexion', value: tenantUrl },
         { label: 'Login', value: params.login },
-        { label: 'Mot de passe temporaire', value: params.password },
-        { label: 'Matricule', value: params.matricule },
-        { label: 'Numéro d’inscription', value: params.enrollmentNumber },
-        { label: 'Reçu', value: params.receiptNumber },
-        { label: 'Montant payé', value: `${params.amount.toLocaleString('fr-FR')} CFA` },
-        { label: 'Année scolaire', value: params.academicYear },
-        { label: 'Semestre', value: params.semester },
-        { label: 'Classe', value: params.className },
+        { label: 'Mot de passe', value: params.password },
       ],
       note:
         'Le mot de passe reçu ici est temporaire. La première connexion affichera une demande de changement de mot de passe.',
@@ -262,83 +249,57 @@ export class EmailService {
     rows: Array<{ label: string; value: string }>;
     note: string;
   }): { html: string; text: string } {
-    const rowsHtml = params.rows
-      .map(
-        (row) => `
-          <tr>
-            <td style="padding:0 0 12px 0;">
-              <div style="border:1px solid #e2e8f0; background:#f8fafc; border-radius:16px; padding:14px 16px;">
-                <div style="font-size:11px; line-height:1; letter-spacing:0.12em; text-transform:uppercase; color:#64748b; margin-bottom:6px;">
-                  ${this.escapeHtml(row.label)}
-                </div>
-                <div style="font-size:15px; line-height:1.5; color:#0f172a; font-weight:600; word-break:break-word;">
-                  ${this.escapeHtml(row.value)}
-                </div>
-              </div>
-            </td>
-          </tr>`,
-      )
-      .join('');
+    const loginInfo = params.rows.find((r) => r.label === 'Login')?.value || '';
+    const passInfo = params.rows.find((r) => r.label.includes('Mot de passe'))?.value || '';
 
     const html = `
-      <div style="margin:0; padding:0; background:#f4f7fb;">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse; background:#f4f7fb; width:100%;">
-          <tr>
-            <td align="center" style="padding:32px 16px;">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse; max-width:680px; font-family:Arial,Helvetica,sans-serif;">
-                <tr>
-                  <td style="padding-bottom:14px; text-align:center; color:#64748b; font-size:12px; letter-spacing:0.12em; text-transform:uppercase;">
-                    ${this.escapeHtml(params.preheader)}
-                  </td>
-                </tr>
-                <tr>
-                  <td style="background:#1d4ed8; background-image:linear-gradient(135deg, #1d4ed8 0%, #2563eb 52%, #0f766e 100%); border-radius:24px 24px 0 0; padding:34px 32px;">
-                    <div style="display:inline-block; background:rgba(255,255,255,0.16); border:1px solid rgba(255,255,255,0.18); color:#ffffff; font-size:12px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; padding:8px 12px; border-radius:999px;">
-                      ${this.escapeHtml(params.banner)}
-                    </div>
-                    <h1 style="margin:18px 0 10px; font-size:30px; line-height:1.2; color:#ffffff;">
-                      ${this.escapeHtml(params.title)}
-                    </h1>
-                    <p style="margin:0; font-size:16px; line-height:1.7; color:rgba(255,255,255,0.92);">
-                      ${this.escapeHtml(params.intro)}
-                    </p>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="background:#ffffff; border-left:1px solid #e2e8f0; border-right:1px solid #e2e8f0; padding:32px;">
-                    <p style="margin:0 0 20px; font-size:16px; line-height:1.7; color:#0f172a;">
-                      ${this.escapeHtml(params.greeting)}
-                    </p>
-                    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse; margin:0 0 8px;">
-                      ${rowsHtml}
-                    </table>
-                    <div style="padding:8px 0 0; text-align:center;">
-                      <a href="${this.escapeHtml(params.ctaUrl)}" style="display:inline-block; background:#1d4ed8; color:#ffffff; text-decoration:none; font-size:14px; font-weight:700; padding:14px 24px; border-radius:14px; box-shadow:0 10px 24px rgba(29,78,216,0.22);">
-                        ${this.escapeHtml(params.ctaLabel)}
-                      </a>
-                    </div>
-                    <p style="margin:14px 0 0; text-align:center; font-size:12px; line-height:1.6; color:#64748b;">
-                      ${this.escapeHtml(`Connexion : ${params.ctaUrl}`)}
-                    </p>
-                    <div style="margin-top:24px; border-left:4px solid #1d4ed8; background:#eff6ff; padding:14px 16px; border-radius:14px;">
-                      <p style="margin:0; font-size:14px; line-height:1.7; color:#1e3a8a;">
-                        ${this.escapeHtml(params.note)}
-                      </p>
-                    </div>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="background:#f8fafc; border:1px solid #e2e8f0; border-top:none; border-radius:0 0 24px 24px; padding:20px 32px; text-align:center;">
-                    <p style="margin:0; font-size:13px; line-height:1.6; color:#64748b;">
-                      L'équipe EduSphere
-                    </p>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-        </table>
-      </div>
+      <!DOCTYPE html>
+      <html lang="fr">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${this.escapeHtml(params.title)}</title>
+      </head>
+      <body style="margin:0; padding:0; background-color:#FAFAFA; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color:#111827;">
+        <div style="max-width:480px; margin:40px auto; background:#FFFFFF; border-radius:12px; overflow:hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);">
+          <div style="padding:40px 32px; text-align:center;">
+            <div style="display:inline-block; padding:8px 16px; background-color:#EFF6FF; color:#2563EB; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.05em; border-radius:9999px; margin-bottom:24px;">
+              ${this.escapeHtml(params.banner)}
+            </div>
+            
+            <h1 style="margin:0 0 16px; font-size:24px; font-weight:700; color:#111827; letter-spacing:-0.025em;">
+              ${this.escapeHtml(params.title)}
+            </h1>
+            
+            <p style="margin:0 0 32px; font-size:15px; line-height:1.6; color:#4B5563;">
+              ${this.escapeHtml(params.intro)}
+            </p>
+
+            <div style="background-color:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:24px; text-align:left; margin-bottom:32px;">
+              <div style="margin-bottom:16px;">
+                <div style="font-size:12px; color:#64748B; font-weight:500; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Identifiant</div>
+                <div style="font-size:16px; color:#0F172A; font-weight:600;">${this.escapeHtml(loginInfo)}</div>
+              </div>
+              <div>
+                <div style="font-size:12px; color:#64748B; font-weight:500; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px;">Mot de passe provisoire</div>
+                <div style="font-size:16px; color:#0F172A; font-weight:600; letter-spacing:0.02em;">${this.escapeHtml(passInfo)}</div>
+              </div>
+            </div>
+
+            <a href="${this.escapeHtml(params.ctaUrl)}" style="display:inline-block; width:100%; padding:14px 24px; background-color:#2563EB; color:#FFFFFF; font-size:15px; font-weight:600; text-decoration:none; border-radius:8px; box-sizing:border-box; text-align:center;">
+              ${this.escapeHtml(params.ctaLabel)}
+            </a>
+
+            <p style="margin:24px 0 0; font-size:13px; color:#94A3B8; line-height:1.5;">
+              ${this.escapeHtml(params.note)}
+            </p>
+          </div>
+        </div>
+        <div style="text-align:center; padding:0 32px 40px;">
+          <p style="margin:0; font-size:12px; color:#94A3B8;">&copy; EduSphere. Tous droits réservés.</p>
+        </div>
+      </body>
+      </html>
     `;
 
     const text = [

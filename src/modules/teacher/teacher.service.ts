@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException, ForbiddenException 
 import { TenantDatabaseService } from '@database/tenant-database.service';
 import { ITenant } from '@common/interfaces/tenant.interface';
 import { CourseStatusValues } from '../school-admin/academic/academic.dto';
+import { getStartOfWeek, parseWeekStart, getDateFromDayName } from '@common/utils/date-utils';
 
 import { TimetableGateway } from '@modules/realtime/timetable.gateway';
 
@@ -62,16 +63,6 @@ private async getDefaultAcademicYearId(client: any, schoolId: string): Promise<s
       },
     });
 
-    const daysMap: Record<string, number> = {
-      'Lundi': 0,
-      'Mardi': 1,
-      'Mercredi': 2,
-      'Jeudi': 3,
-      'Vendredi': 4,
-      'Samedi': 5,
-      'Dimanche': 6,
-    };
-
     for (const entry of annualEntries) {
       const existingInstance = await client.weeklyCourseInstance.findUnique({
         where: {
@@ -82,10 +73,21 @@ private async getDefaultAcademicYearId(client: any, schoolId: string): Promise<s
         },
       });
 
-      if (!existingInstance) {
-        const dayIndex = daysMap[entry.dayOfWeek] ?? 1;
-        const instanceDate = new Date(startOfWeek);
-        instanceDate.setDate(startOfWeek.getDate() + dayIndex);
+      if (existingInstance) {
+        const correctDate = getDateFromDayName(startOfWeek, entry.dayOfWeek);
+        const existingDateStr = existingInstance.date instanceof Date 
+          ? existingInstance.date.toISOString().split('T')[0] 
+          : new Date(existingInstance.date).toISOString().split('T')[0];
+        const correctDateStr = correctDate.toISOString().split('T')[0];
+
+        if (existingDateStr !== correctDateStr) {
+          await client.weeklyCourseInstance.update({
+            where: { id: existingInstance.id },
+            data: { date: correctDate },
+          });
+        }
+      } else {
+        const instanceDate = getDateFromDayName(startOfWeek, entry.dayOfWeek);
 
         await client.weeklyCourseInstance.create({
           data: {
@@ -356,13 +358,9 @@ private async getDefaultAcademicYearId(client: any, schoolId: string): Promise<s
 
     let startOfWeek: Date;
     if (query.weekStartDate) {
-      startOfWeek = new Date(query.weekStartDate);
-      startOfWeek.setHours(0, 0, 0, 0);
+      startOfWeek = parseWeekStart(query.weekStartDate);
     } else {
-      const now = new Date();
-      startOfWeek = new Date(now);
-      startOfWeek.setDate(now.getDate() - now.getDay() + 1);
-      startOfWeek.setHours(0, 0, 0, 0);
+      startOfWeek = getStartOfWeek(new Date());
     }
 
     const endOfWeek = new Date(startOfWeek);

@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { getStartOfWeek, parseWeekStart, getDateFromDayName } from '@common/utils/date-utils';
 import { TenantDatabaseService } from '@database/tenant-database.service';
 import { ITenant } from '@common/interfaces/tenant.interface';
 import { refreshCompletedSemesterAverages } from '../shared/semester-average.util';
@@ -235,6 +236,9 @@ export class AcademicService {
         schoolId,
         name,
         sortOrder: dto.sortOrder ?? 0,
+        enrollmentFee: dto.enrollmentFee ?? 0,
+        reEnrollmentFee: dto.reEnrollmentFee ?? 0,
+        nextLevelId: dto.nextLevelId || null,
         description: dto.description?.trim() || null,
         status: dto.status ?? LevelStatusValues.active,
       },
@@ -279,6 +283,9 @@ export class AcademicService {
       data: {
         ...(dto.name !== undefined ? { name: normalizedName } : {}),
         ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+        ...(dto.enrollmentFee !== undefined ? { enrollmentFee: dto.enrollmentFee } : {}),
+        ...(dto.reEnrollmentFee !== undefined ? { reEnrollmentFee: dto.reEnrollmentFee } : {}),
+        ...(dto.nextLevelId !== undefined ? { nextLevelId: dto.nextLevelId || null } : {}),
         ...(dto.description !== undefined ? { description: dto.description?.trim() || null } : {}),
         ...(dto.status !== undefined ? { status: dto.status } : {}),
       },
@@ -2930,6 +2937,9 @@ export class AcademicService {
       name: current.name,
       description: current.description ?? '',
       sortOrder: current.sortOrder ?? 0,
+      enrollmentFee: current.enrollmentFee ?? 0,
+      reEnrollmentFee: current.reEnrollmentFee ?? 0,
+      nextLevelId: current.nextLevelId ?? null,
       status: current.status,
       classes: current._count?.classes ?? fallback?._count?.classes ?? 0,
     };
@@ -3294,8 +3304,7 @@ export class AcademicService {
     const client = await this.getClient(tenant);
     const schoolId = this.requireTenant(tenant).id;
 
-    const startOfWeek = new Date(weekStartDate);
-    startOfWeek.setHours(0, 0, 0, 0);
+    const startOfWeek = parseWeekStart(weekStartDate);
     const endOfWeek = new Date(startOfWeek);
     endOfWeek.setDate(startOfWeek.getDate() + 6);
     endOfWeek.setHours(23, 59, 59, 999);
@@ -3315,16 +3324,6 @@ export class AcademicService {
       },
     });
 
-    const daysMap: Record<string, number> = {
-      'Lundi': 0,
-      'Mardi': 1,
-      'Mercredi': 2,
-      'Jeudi': 3,
-      'Vendredi': 4,
-      'Samedi': 5,
-      'Dimanche': 6,
-    };
-
     const createdInstances = [];
 
     for (const entry of annualEntries) {
@@ -3337,10 +3336,21 @@ export class AcademicService {
         },
       });
 
-      if (!existingInstance) {
-        const dayIndex = daysMap[entry.dayOfWeek] ?? 1;
-        const instanceDate = new Date(startOfWeek);
-        instanceDate.setDate(startOfWeek.getDate() + dayIndex);
+      if (existingInstance) {
+        const correctDate = getDateFromDayName(startOfWeek, entry.dayOfWeek);
+        const existingDateStr = existingInstance.date instanceof Date 
+          ? existingInstance.date.toISOString().split('T')[0] 
+          : new Date(existingInstance.date).toISOString().split('T')[0];
+        const correctDateStr = correctDate.toISOString().split('T')[0];
+
+        if (existingDateStr !== correctDateStr) {
+          await client.weeklyCourseInstance.update({
+            where: { id: existingInstance.id },
+            data: { date: correctDate },
+          });
+        }
+      } else {
+        const instanceDate = getDateFromDayName(startOfWeek, entry.dayOfWeek);
         let initialStatus: string = CourseStatusValues.SCHEDULED;
         const now = new Date();
         const todayStr = this.toDateOnly(now);
@@ -3393,8 +3403,7 @@ export class AcademicService {
     const client = await this.getClient(tenant);
     const schoolId = this.requireTenant(tenant).id;
 
-    const startOfWeek = new Date(weekStartDate);
-    startOfWeek.setHours(0, 0, 0, 0);
+    const startOfWeek = parseWeekStart(weekStartDate);
 
     const where: any = {
       schoolId,

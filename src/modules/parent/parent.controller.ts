@@ -1,4 +1,4 @@
-import { Controller, Get, Param, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Param, Query, UseGuards, Req } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiHeader,
@@ -47,9 +47,19 @@ export class ParentController {
     @CurrentTenant() tenant: ITenant | null,
     @CurrentUser('sub') userId: string,
     @Param('childId') childId: string,
-    @Req() req: Request,
+    @Query('weekStartDate') weekStartDate?: string,
   ) {
-    const data = await this.parentService.getChildTimetable(userId, childId, tenant);
+    const data = await this.parentService.getChildTimetable(userId, childId, tenant, weekStartDate);
+    return { data };
+  }
+
+  @Get('payments')
+  @ApiOperation({ summary: 'Récupérer l\'historique des paiements du parent' })
+  async getPayments(
+    @CurrentTenant() tenant: ITenant | null,
+    @CurrentUser('sub') userId: string,
+  ) {
+    const data = await this.parentService.getPayments(userId, tenant);
     return { data };
   }
 }

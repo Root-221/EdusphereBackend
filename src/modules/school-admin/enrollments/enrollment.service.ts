@@ -5,6 +5,7 @@ import {
   NotFoundException,
   Logger,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EmailService } from '@common/email/email.service';
 import { ITenant } from '@common/interfaces/tenant.interface';
 import { TenantDatabaseService } from '@database/tenant-database.service';
@@ -38,6 +39,7 @@ export class EnrollmentService {
     private readonly tenantDatabaseService: TenantDatabaseService,
     private readonly emailService: EmailService,
     private readonly tenantProvisioningService: TenantProvisioningService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async listPeriods(tenant: ITenant | null, type?: string): Promise<any[]> {
@@ -438,7 +440,7 @@ export class EnrollmentService {
     }
 
     const paymentMethod = dto.paymentMethod ?? 'cash';
-    const paymentAmount = dto.paymentAmount ?? 0;
+    const paymentAmount = dto.paymentAmount ?? schoolClass.level?.enrollmentFee ?? 0;
     const studentPassword = generateTemporaryPassword();
     const parentPassword = generateTemporaryPassword();
     const [studentPasswordHash, parentPasswordHash] = await Promise.all([
@@ -570,15 +572,7 @@ export class EnrollmentService {
     );
 
     if (created.emailPayload) {
-      try {
-        await this.sendEnrollmentEmails(created.emailPayload);
-      } catch (error) {
-        this.logger.warn(
-          `Inscription ${created.enrollment.enrollmentNumber} enregistrée, mais l’envoi des emails a échoué: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
+      this.eventEmitter.emit('enrollment.created', created.emailPayload);
     }
 
     return this.mapEnrollment(created.enrollment);
@@ -635,7 +629,7 @@ export class EnrollmentService {
     }
 
     const paymentMethod = dto.paymentMethod ?? 'cash';
-    const paymentAmount = dto.paymentAmount ?? 0;
+    const paymentAmount = dto.paymentAmount ?? schoolClass.level?.reEnrollmentFee ?? 0;
     const created = await client.$transaction(
       async (tx: any) => {
         const periodEnrollmentCount = await tx.enrollment.count({
@@ -945,7 +939,7 @@ export class EnrollmentService {
     return 0;
   }
 
-  private async sendEnrollmentEmails(params: {
+  async sendEnrollmentEmails(params: {
     school: ITenant;
     student: {
       user: any;

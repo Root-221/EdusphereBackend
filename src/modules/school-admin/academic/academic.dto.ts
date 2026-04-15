@@ -7,6 +7,7 @@ import {
   IsEnum,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -257,6 +258,23 @@ export class CreateLevelDto {
   @IsOptional()
   @IsEnum(LevelStatusValues)
   status?: LevelStatus;
+
+  @ApiPropertyOptional({ example: 50000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  enrollmentFee?: number;
+
+  @ApiPropertyOptional({ example: 30000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  reEnrollmentFee?: number;
+
+  @ApiPropertyOptional({ example: 'cmbx123nextlevel' })
+  @IsOptional()
+  @IsString()
+  nextLevelId?: string;
 }
 
 export class UpdateLevelDto extends PartialType(CreateLevelDto) {}

@@ -8,6 +8,7 @@ import {
   IsEnum,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -234,7 +235,7 @@ export class CreateEnrollmentDto {
   @ApiPropertyOptional({ example: 260000, minimum: 0 })
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
+  @IsNumber()
   @Min(0)
   paymentAmount?: number;
 
@@ -275,7 +276,7 @@ export class CreateReEnrollmentDto {
   @ApiPropertyOptional({ example: 150000, minimum: 0 })
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
+  @IsNumber()
   @Min(0)
   paymentAmount?: number;
 

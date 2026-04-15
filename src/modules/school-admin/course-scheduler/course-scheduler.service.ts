@@ -5,6 +5,8 @@ import { TenantDatabaseService } from '@database/tenant-database.service';
 import { ITenant } from '@common/interfaces/tenant.interface';
 import { CourseStatusValues } from '../academic/academic.dto';
 import { TimetableGateway } from '@modules/realtime/timetable.gateway';
+import { WeekDayValues } from '../academic/academic.dto';
+import { DAYS_LIST } from '@common/utils/date-utils';
 
 @Injectable()
 export class CourseSchedulerService {
@@ -57,8 +59,8 @@ export class CourseSchedulerService {
     try {
       const now = new Date();
       const currentTime = this.formatTime(now);
-      const todayStr = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().split('T')[0];
-      const todayWithTimeAtMidnight = new Date(todayStr + 'T00:00:00.000Z');
+      const todayWithTimeAtMidnight = new Date(now);
+      todayWithTimeAtMidnight.setHours(0, 0, 0, 0);
 
       let updatedAny = false;
 

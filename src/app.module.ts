@@ -2,6 +2,7 @@ import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { PrismaModule } from '@database/prisma.module';
 import { AuthModule } from '@modules/auth/auth.module';
 import { SuperAdminModule } from '@modules/super-admin/super-admin.module';
@@ -34,6 +35,7 @@ import { TenantMiddleware } from '@common/middleware/tenant.middleware';
       ],
     }),
     ScheduleModule.forRoot(),
+    EventEmitterModule.forRoot(),
     PrismaModule,
     AuthModule,
     SuperAdminModule,
