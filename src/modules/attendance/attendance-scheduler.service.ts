@@ -97,7 +97,7 @@ export class AttendanceSchedulerService {
           studentId: student.id,
           courseInstanceId: instance.id,
           status: 'ABSENT',
-          markedById: 'SYSTEM',
+          markedById: null,
           method: 'AUTOMATIC',
           notes: 'Marqué absent automatiquement après 30 minutes.'
         }

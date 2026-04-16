@@ -1,9 +1,12 @@
 import { Injectable, BadRequestException, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { TenantDatabaseService } from '@database/tenant-database.service';
 import { ITenant } from '@common/interfaces/tenant.interface';
 import { JwtService } from '@nestjs/jwt';
 import { MarkAttendanceDto, AttendanceMethod, ManualAttendanceDto } from './dto/attendance.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { TenantProvisioningService } from '@database/tenant-provisioning.service';
+import { withTenantSchemaRepair } from '../school-admin/shared/schema-repair.util';
 
 @Injectable()
 export class AttendanceService {
@@ -13,6 +16,7 @@ export class AttendanceService {
     private readonly tenantDatabaseService: TenantDatabaseService,
     private readonly jwtService: JwtService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly tenantProvisioningService: TenantProvisioningService,
   ) {}
 
   private async getClient(tenant: ITenant | null) {
@@ -40,96 +44,98 @@ export class AttendanceService {
     userRole: string,
     dto: MarkAttendanceDto
   ) {
-    const client = await this.getClient(tenant);
-    const schoolId = tenant!.id;
+    return withTenantSchemaRepair(tenant, this.tenantProvisioningService, async () => {
+      const client = await this.getClient(tenant);
+      const schoolId = tenant!.id;
 
-    // 1. Identifier l'élève
-    let studentId = dto.studentIdOrToken;
-    if (dto.method === AttendanceMethod.QR_CODE) {
-      const studentByQr = await client.studentProfile.findFirst({
-        where: { qrCode: dto.studentIdOrToken },
-        select: { id: true }
+      // 1. Identifier l'élève
+      let studentId = dto.studentIdOrToken;
+      if (dto.method === AttendanceMethod.QR_CODE) {
+        const studentByQr = await client.studentProfile.findFirst({
+          where: { qrCode: dto.studentIdOrToken },
+          select: { id: true }
+        });
+        if (!studentByQr) {
+          throw new BadRequestException('QR Code invalide ou non reconnu.');
+        }
+        studentId = studentByQr.id;
+      }
+
+      // 2. Vérifier l'existence de l'élève et son appartenance à la classe
+      const student = await client.studentProfile.findUnique({
+        where: { id: studentId },
+        include: { 
+          user: true,
+          parentUser: true
+        }
       });
-      if (!studentByQr) {
-        throw new BadRequestException('QR Code invalide ou non reconnu.');
-      }
-      studentId = studentByQr.id;
-    }
+      if (!student) throw new NotFoundException('Élève non trouvé.');
 
-    // 2. Vérifier l'existence de l'élève et son appartenance à la classe
-    const student = await client.studentProfile.findUnique({
-      where: { id: studentId },
-      include: { 
-        user: true,
-        parentUser: true
-      }
-    });
-    if (!student) throw new NotFoundException('Élève non trouvé.');
+      // 3. Récupérer l'instance de cours
+      const instance = await client.weeklyCourseInstance.findUnique({
+        where: { id: dto.courseInstanceId },
+        include: {
+          annualTimetableEntry: {
+            include: {
+              subject: true,
+              class: true
+            }
+          },
+        }
+      });
+      if (!instance) throw new NotFoundException('Cours non trouvé.');
 
-    // 3. Récupérer l'instance de cours
-    const instance = await client.weeklyCourseInstance.findUnique({
-      where: { id: dto.courseInstanceId },
-      include: {
-        annualTimetableEntry: {
-          include: {
-            subject: true,
-            class: true
+      // 4. Vérifier les permissions (Prof du cours ou Délégué de la classe)
+      await this.validateMarkerPermissions(client, userId, userRole, instance);
+
+      // 5. Calculer le statut (Logique 15/30 min)
+      const status = this.calculateAttendanceStatus(instance.startTime);
+
+      // 6. Enregistrer la présence (Upsert pour permettre de corriger si erreur)
+      const attendance = await client.attendance.upsert({
+        where: {
+          studentId_courseInstanceId: {
+            studentId,
+            courseInstanceId: dto.courseInstanceId
           }
         },
-      }
-    });
-    if (!instance) throw new NotFoundException('Cours non trouvé.');
-
-    // 4. Vérifier les permissions (Prof du cours ou Délégué de la classe)
-    await this.validateMarkerPermissions(client, userId, userRole, instance);
-
-    // 5. Calculer le statut (Logique 15/30 min)
-    const status = this.calculateAttendanceStatus(instance.startTime);
-
-    // 6. Enregistrer la présence (Upsert pour permettre de corriger si erreur)
-    const attendance = await client.attendance.upsert({
-      where: {
-        studentId_courseInstanceId: {
+        update: {
+          status,
+          markedById: userId,
+          method: dto.method,
+          arrivalTime: new Date(),
+          notes: dto.notes
+        },
+        create: {
+          schoolId,
           studentId,
-          courseInstanceId: dto.courseInstanceId
+          courseInstanceId: dto.courseInstanceId,
+          status,
+          markedById: userId,
+          method: dto.method,
+          arrivalTime: new Date(),
+          notes: dto.notes
         }
-      },
-      update: {
-        status,
-        markedById: userId,
-        method: dto.method,
-        arrivalTime: new Date(),
-        notes: dto.notes
-      },
-      create: {
-        schoolId,
-        studentId,
-        courseInstanceId: dto.courseInstanceId,
-        status,
-        markedById: userId,
-        method: dto.method,
-        arrivalTime: new Date(),
-        notes: dto.notes
-      }
-    });
+      });
 
-    // 7. Émettre un événement pour notifications (Parents, Realtime)
-    this.eventEmitter.emit('attendance.marked', {
-      attendance,
-      studentName: `${student.user.firstName} ${student.user.lastName}`,
-      className: instance.annualTimetableEntry.class.name,
-      subjectName: instance.annualTimetableEntry.subject.name,
-      instanceId: instance.id,
-      tenant,
-      studentProfile: student
-    });
+      // 7. Émettre un événement pour notifications (Parents, Realtime)
+      this.eventEmitter.emit('attendance.marked', {
+        attendance,
+        studentName: `${student.user.firstName} ${student.user.lastName}`,
+        className: instance.annualTimetableEntry.class.name,
+        subjectName: instance.annualTimetableEntry.subject.name,
+        instanceId: instance.id,
+        tenant,
+        studentProfile: student
+      });
 
-    return {
-      success: true,
-      status,
-      studentName: `${student.user.firstName} ${student.user.lastName}`,
-      arrivalTime: attendance.arrivalTime
-    };
+      return {
+        success: true,
+        status,
+        studentName: `${student.user.firstName} ${student.user.lastName}`,
+        arrivalTime: attendance.arrivalTime
+      };
+    });
   }
 
   /**
@@ -215,79 +221,87 @@ export class AttendanceService {
     studentId: string,
     reason: string,
   ) {
-    const client = await this.getClient(tenant);
-    const cleanedReason = reason.trim();
+    return withTenantSchemaRepair(tenant, this.tenantProvisioningService, async () => {
+      const client = await this.getClient(tenant);
+      const cleanedReason = reason.trim();
 
-    if (!cleanedReason) {
-      throw new BadRequestException('Le motif de justification est obligatoire.');
-    }
+      if (!cleanedReason) {
+        throw new BadRequestException('Le motif de justification est obligatoire.');
+      }
 
-    const instance = await client.weeklyCourseInstance.findUnique({
-      where: { id: courseInstanceId },
-      include: { annualTimetableEntry: true },
-    });
+      const instance = await client.weeklyCourseInstance.findUnique({
+        where: { id: courseInstanceId },
+        include: { annualTimetableEntry: true },
+      });
 
-    if (!instance) throw new NotFoundException('Cours non trouvé');
+      if (!instance) throw new NotFoundException('Cours non trouvé');
 
-    await this.validateMarkerPermissions(
-      client,
-      userId,
-      userRole,
-      instance,
-    );
+      await this.validateMarkerPermissions(
+        client,
+        userId,
+        userRole,
+        instance,
+      );
 
-    const attendance = await client.attendance.findUnique({
-      where: {
-        studentId_courseInstanceId: {
-          studentId,
-          courseInstanceId,
+      const attendance = await client.attendance.findUnique({
+        where: {
+          studentId_courseInstanceId: {
+            studentId,
+            courseInstanceId,
+          },
         },
-      },
-    });
+      });
 
-    if (!attendance) {
-      throw new NotFoundException('Aucune absence trouvée pour cet élève.');
-    }
+      if (!attendance) {
+        throw new NotFoundException('Aucune absence trouvée pour cet élève.');
+      }
 
-    const attendanceStatus = attendance.status as string;
-    if (attendanceStatus !== 'ABSENT' && attendanceStatus !== 'EXCUSED') {
-      throw new BadRequestException('Seule une absence peut être justifiée.');
-    }
+      const attendanceStatus = attendance.status as string;
+      if (attendanceStatus !== 'ABSENT' && attendanceStatus !== 'EXCUSED') {
+        throw new BadRequestException('Seule une absence peut être justifiée.');
+      }
 
-    const student = await client.studentProfile.findUnique({
-      where: { id: studentId },
-      include: {
-        user: { select: { firstName: true, lastName: true, avatar: true } },
-        parentUser: true,
-      },
-    });
-
-    if (!student) {
-      throw new NotFoundException('Élève non trouvé.');
-    }
-
-    const updatedAttendance = await client.attendance.update({
-      where: {
-        studentId_courseInstanceId: {
-          studentId,
-          courseInstanceId,
+      const student = await client.studentProfile.findUnique({
+        where: { id: studentId },
+        include: {
+          user: { select: { firstName: true, lastName: true, avatar: true } },
+          parentUser: true,
         },
-      },
-      data: {
-        status: 'EXCUSED' as any,
-        method: AttendanceMethod.MANUAL,
-        markedById: userId,
-        notes: cleanedReason,
-      },
-    });
+      });
 
-    return {
-      success: true,
-      status: 'EXCUSED' as const,
-      studentName: `${student.user.firstName} ${student.user.lastName}`,
-      arrivalTime: updatedAttendance.arrivalTime,
-      notes: updatedAttendance.notes,
-    };
+      if (!student) {
+        throw new NotFoundException('Élève non trouvé.');
+      }
+
+      // Vérifier si l'utilisateur qui marque existe dans le tenant (sécurité multi-tenant)
+      const markingUserExists = await client.user.findUnique({
+        where: { id: userId },
+        select: { id: true },
+      });
+
+      const updatedAttendance = await client.attendance.update({
+        where: {
+          studentId_courseInstanceId: {
+            studentId,
+            courseInstanceId,
+          },
+        },
+        data: {
+          status: 'EXCUSED',
+          method: AttendanceMethod.MANUAL,
+          markedById: markingUserExists ? userId : null,
+          notes: cleanedReason,
+        },
+      });
+
+      return {
+        success: true,
+        status: 'EXCUSED' as const,
+        studentName: `${student.user.firstName} ${student.user.lastName}`,
+        arrivalTime: updatedAttendance.arrivalTime,
+        notes: updatedAttendance.notes,
+      };
+    });
   }
 
   /**

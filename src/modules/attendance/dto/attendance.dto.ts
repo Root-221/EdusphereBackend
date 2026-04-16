@@ -4,6 +4,7 @@ import { ApiProperty } from '@nestjs/swagger';
 export enum AttendanceMethod {
   QR_CODE = 'QR_CODE',
   MANUAL = 'MANUAL',
+  AUTOMATIC = 'AUTOMATIC',
 }
 
 export class MarkAttendanceDto {

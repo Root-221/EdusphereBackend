@@ -11,6 +11,8 @@ import type { Request } from 'express';
 import { ErrorResponse } from '../dtos/response.dto';
 import { ErrorCode } from '../enums/error-codes.enum';
 import { ErrorMessages } from '../i18n/error-messages';
+import * as fs from 'fs';
+import * as path from 'path';
 
 type PrismaErrorLike = {
   code?: string;

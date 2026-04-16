@@ -18,7 +18,7 @@ export function isSchemaMismatchError(error: unknown): boolean {
     return false;
   }
 
-  if (error.code === 'P2021' || error.code === 'P2022') {
+  if (error.code === 'P2021' || error.code === 'P2022' || error.code === 'P2011') {
     return true;
   }
 
@@ -26,7 +26,16 @@ export function isSchemaMismatchError(error: unknown): boolean {
     const meta = error.meta;
     const dbCode = typeof meta?.code === 'string' ? meta.code : '';
     const message = typeof meta?.message === 'string' ? meta.message : '';
-    return dbCode === '42P01' || /relation .* does not exist/i.test(message) || /table .* does not exist/i.test(message);
+    
+    return (
+      dbCode === '42P01' || // relation does not exist
+      dbCode === '42703' || // undefined column
+      dbCode === '22P02' || // invalid text representation (often enum mismatch)
+      /relation .* does not exist/i.test(message) ||
+      /table .* does not exist/i.test(message) ||
+      /column .* does not exist/i.test(message) ||
+      /invalid input value for enum/i.test(message)
+    );
   }
 
   return false;

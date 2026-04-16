@@ -637,8 +637,8 @@ model Attendance {
   courseInstance   WeeklyCourseInstance @relation(fields: [courseInstanceId], references: [id], onDelete: Cascade)
   status           AttendanceStatus     @default(PRESENT)
   arrivalTime      DateTime             @default(now())
-  markedById       String
-  markedBy         User                 @relation("AttendanceMarker", fields: [markedById], references: [id])
+  markedById       String?
+  markedBy         User?                 @relation("AttendanceMarker", fields: [markedById], references: [id])
   method           AttendanceMethod     @default(QR_CODE)
   notes            String?
   createdAt        DateTime             @default(now())
@@ -661,4 +661,5 @@ enum AttendanceStatus {
 enum AttendanceMethod {
   QR_CODE
   MANUAL
+  AUTOMATIC
 }
