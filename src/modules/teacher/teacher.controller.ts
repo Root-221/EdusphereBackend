@@ -34,7 +34,7 @@ import { ListTeacherClassesQueryDto, ListTeacherTimetableQueryDto, CancelTeacher
   description: 'Résolution du tenant scolaire pour les routes professeur.',
 })
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(UserRole.TEACHER)
+@Roles(UserRole.TEACHER, UserRole.STUDENT)
 @Controller('teacher')
 export class TeacherController {
   constructor(private readonly teacherService: TeacherService) {}

@@ -12,5 +12,6 @@ export interface AuthResponse {
     schoolName: string | null;
     schoolSlug: string | null;
     mustChangePassword: boolean;
+    isClassLeader: boolean;
   };
 }

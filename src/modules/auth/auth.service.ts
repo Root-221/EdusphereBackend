@@ -326,11 +326,15 @@ async login(loginDto: LoginDto, ipAddress: string, tenant: ITenant | null): Prom
       avatar?: string | null;
       role: UserRole;
       mustChangePassword?: boolean;
+      studentProfile?: {
+        isClassLeader: boolean;
+      };
     },
     tenant: ITenant | null,
     accessToken: string,
     refreshToken: string,
   ): AuthResponse {
+    const isClassLeader = Boolean(user.studentProfile?.isClassLeader);
     return {
       accessToken,
       refreshToken,
@@ -345,6 +349,7 @@ async login(loginDto: LoginDto, ipAddress: string, tenant: ITenant | null): Prom
         schoolName: tenant?.name ?? null,
         schoolSlug: tenant?.slug ?? null,
         mustChangePassword: Boolean(user.mustChangePassword),
+        isClassLeader: isClassLeader,
       },
     };
   }

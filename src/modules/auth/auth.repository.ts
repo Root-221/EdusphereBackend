@@ -95,6 +95,16 @@ export class AuthRepository {
     }
   }
 
+  private buildUserQueryOptions(tenant: ITenant | null) {
+    return tenant
+      ? {
+          include: {
+            studentProfile: true,
+          },
+        }
+      : {};
+  }
+
   async findUserByEmail(email: string, tenant?: ITenant | null): Promise<User | null> {
     const prisma = await this.resolvePrismaClient(tenant);
     return this.withTenantSchemaRepair(tenant ?? null, () =>
@@ -102,13 +112,19 @@ export class AuthRepository {
         where: {
           email,
         },
+        ...this.buildUserQueryOptions(tenant ?? null),
       }),
     );
   }
 
   async findUserById(id: string, tenant?: ITenant | null): Promise<User | null> {
     const prisma = await this.resolvePrismaClient(tenant);
-    return this.withTenantSchemaRepair(tenant ?? null, () => prisma.user.findUnique({ where: { id } }));
+    return this.withTenantSchemaRepair(tenant ?? null, () =>
+      prisma.user.findUnique({
+        where: { id },
+        ...this.buildUserQueryOptions(tenant ?? null),
+      }),
+    );
   }
 
   /** Cherche une école par son slug unique. Utilisé par registerSchool() et le TenantMiddleware. */

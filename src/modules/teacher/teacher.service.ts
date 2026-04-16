@@ -380,7 +380,23 @@ private async getDefaultAcademicYearId(client: any, schoolId: string): Promise<s
       orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
     });
 
-    let instances = allInstances.filter((i: any) => i.annualTimetableEntry?.teacherId === teacherId);
+    const user = await client.user.findUnique({ where: { id: teacherId } });
+    let instances: any[] = [];
+
+    if (user?.role === 'STUDENT') {
+      const student = await client.studentProfile.findFirst({ where: { userId: teacherId } });
+      if (student?.isClassLeader) {
+        // Le délégué voit tous les cours de sa classe
+        instances = allInstances.filter((i: any) => i.annualTimetableEntry?.classId === student.classId);
+      } else {
+        // Un élève normal ne devrait peut-être pas voir cette liste, 
+        // mais pour les présences on restreint ici au cas où
+        instances = [];
+      }
+    } else {
+      // Le professeur voit ses propres cours
+      instances = allInstances.filter((i: any) => i.annualTimetableEntry?.teacherId === teacherId);
+    }
 
     if (query.classId && query.classId !== 'all') {
       instances = instances.filter((i: any) => i.annualTimetableEntry?.classId === query.classId);

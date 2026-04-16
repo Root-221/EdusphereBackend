@@ -158,6 +158,17 @@ export class UsersController {
     return { data };
   }
 
+  @Post('students/:id/toggle-leader')
+  @ApiOperation({ summary: 'Nommer ou révoquer un délégué de classe' })
+  @ApiParam({ name: 'id', description: 'ID utilisateur de l élève' })
+  async toggleClassLeader(
+    @CurrentTenant() tenant: ITenant | null,
+    @Param('id') id: string,
+  ) {
+    const data = await this.usersService.toggleClassLeader(tenant, id);
+    return { data };
+  }
+
   @Get('parents')
   @ApiOperation({ summary: 'Lister les parents' })
   @ApiOkResponse({ description: 'Liste des parents' })

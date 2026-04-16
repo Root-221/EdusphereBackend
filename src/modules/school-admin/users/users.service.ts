@@ -517,6 +517,31 @@ export class UsersService {
     });
   }
 
+  async toggleClassLeader(tenant: ITenant | null, id: string): Promise<any> {
+    return withTenantSchemaRepair(tenant, this.tenantProvisioningService, async () => {
+      const client = await this.getClient(tenant);
+      
+      const student = await client.studentProfile.findFirst({
+        where: { userId: id }
+      });
+
+      if (!student) {
+        throw new NotFoundException('Eleve introuvable');
+      }
+
+      const updated = await client.studentProfile.update({
+        where: { id: student.id },
+        data: { isClassLeader: !student.isClassLeader }
+      });
+
+      return {
+        success: true,
+        isClassLeader: updated.isClassLeader,
+        message: updated.isClassLeader ? 'Eleve nomme delegue' : 'Status de delegue revoque'
+      };
+    });
+  }
+
   async listParents(tenant: ITenant | null): Promise<any[]> {
     const client = await this.getClient(tenant);
     const parents = await client.user.findMany({
@@ -1071,6 +1096,7 @@ export class UsersService {
       gender: profile?.gender ?? '',
       address: profile?.address ?? '',
       previousSchool: profile?.previousSchool ?? '',
+      isClassLeader: profile?.isClassLeader ?? false,
     };
   }
 

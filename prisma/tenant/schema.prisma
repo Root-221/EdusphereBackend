@@ -36,6 +36,7 @@ model User {
   headTeacherClasses SchoolClass[]    @relation("ClassHeadTeacher")
   timetableEntries   TimetableEntry[] @relation("TimetableTeacher")
   annualTimetableEntries AnnualTimetableEntry[] @relation("AnnualTimetableTeacher")
+  markedAttendances Attendance[] @relation("AttendanceMarker")
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
 }
@@ -266,6 +267,8 @@ model StudentProfile {
   matricule      String?     @unique
   enrollmentYear String
   qrCode         String?
+  isClassLeader  Boolean     @default(false)
+  attendances    Attendance[]
   dateOfBirth    DateTime?
   gender         String?
   address        String?
@@ -551,6 +554,7 @@ model WeeklyCourseInstance {
   cancellationReason    String?
   roomId                String?
   room                  Room?      @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  attendances           Attendance[]
   createdAt             DateTime   @default(now())
   updatedAt             DateTime   @updatedAt
 
@@ -622,4 +626,39 @@ enum CourseStatus {
   IN_PROGRESS
   COMPLETED
   CANCELLED
+}
+
+model Attendance {
+  id               String               @id @default(cuid())
+  schoolId         String
+  studentId        String
+  student          StudentProfile       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  courseInstanceId String
+  courseInstance   WeeklyCourseInstance @relation(fields: [courseInstanceId], references: [id], onDelete: Cascade)
+  status           AttendanceStatus     @default(PRESENT)
+  arrivalTime      DateTime             @default(now())
+  markedById       String
+  markedBy         User                 @relation("AttendanceMarker", fields: [markedById], references: [id])
+  method           AttendanceMethod     @default(QR_CODE)
+  notes            String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@unique([studentId, courseInstanceId])
+  @@index([schoolId])
+  @@index([studentId])
+  @@index([courseInstanceId])
+  @@index([status])
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  EXCUSED
+}
+
+enum AttendanceMethod {
+  QR_CODE
+  MANUAL
 }

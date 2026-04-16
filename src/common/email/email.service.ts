@@ -210,6 +210,65 @@ export class EmailService {
     });
   }
 
+  async sendAttendanceNotification(params: {
+    to: string;
+    parentName: string;
+    studentName: string;
+    courseName: string;
+    status: 'PRESENT' | 'LATE' | 'ABSENT';
+    arrivalTime: Date;
+    schoolName: string;
+  }): Promise<EmailSendResult> {
+    const statusLabel = params.status === 'LATE' ? 'en retard' : 'absent';
+    const statusColor = params.status === 'LATE' ? '#F59E0B' : '#EF4444';
+    const timeStr = params.arrivalTime.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    
+    const subject = `Notification d'absence/retard • ${params.studentName} • ${params.schoolName}`;
+    const { html, text } = this.buildStyledAttendanceEmail({
+      studentName: params.studentName,
+      courseName: params.courseName,
+      statusLabel,
+      statusColor,
+      time: timeStr,
+      schoolName: params.schoolName
+    });
+
+    return await this.send({
+      to: [{ email: params.to, name: params.parentName }],
+      subject,
+      html,
+      text
+    });
+  }
+
+  private buildStyledAttendanceEmail(params: any): { html: string; text: string } {
+    const html = `
+      <!DOCTYPE html>
+      <html lang="fr">
+      <body style="margin:0; padding:0; background-color:#FAFAFA; font-family: sans-serif; color:#111827;">
+        <div style="max-width:480px; margin:40px auto; background:#FFFFFF; border-radius:12px; overflow:hidden; border: 1px solid #E5E7EB;">
+          <div style="padding:32px; text-align:center;">
+            <div style="display:inline-block; padding:8px 16px; background-color:${params.statusColor}20; color:${params.statusColor}; font-size:12px; font-weight:700; text-transform:uppercase; border-radius:9999px; margin-bottom:16px;">
+              Alerte Présence
+            </div>
+            <h2 style="margin:0 0 16px; font-size:20px; color:#111827;">Suivi de présence</h2>
+            <p style="font-size:15px; line-height:1.6; color:#4B5563;">
+              Nous vous informons que votre enfant, <strong>${params.studentName}</strong>, a été marqué 
+              <span style="color:${params.statusColor}; font-weight:700;">${params.statusLabel}</span> 
+              pour le cours de <strong>${params.courseName}</strong> à ${params.time}.
+            </p>
+            <div style="margin-top:24px; padding:16px; background-color:#F9FAFB; border-radius:8px; font-size:13px; color:#6B7280;">
+              Cette notification automatique vous est envoyée par <strong>${params.schoolName}</strong> via la plateforme EduSphere.
+            </div>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    const text = `Notification de présence : ${params.studentName} est ${params.statusLabel} pour le cours de ${params.courseName} à ${params.time}. Ecole: ${params.schoolName}`;
+    return { html, text };
+  }
+
   private getTimeout(key: string, fallback: number): number {
     const rawValue = this.config.get<string>(key);
     if (!rawValue) {
