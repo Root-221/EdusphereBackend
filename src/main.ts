@@ -10,7 +10,7 @@ import { join } from 'node:path';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: true });
   const port = Number(process.env.PORT || 3000);
-  const host = '127.0.0.1';
+  const host = '0.0.0.0'; // CHANGÉ: 0.0.0.0 au lieu de 127.0.0.1 pour être visible par Render
   
   app.useStaticAssets(join(process.cwd(), 'uploads'), {
     prefix: '/uploads',
