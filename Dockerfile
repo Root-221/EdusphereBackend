@@ -1,5 +1,8 @@
 FROM node:20-alpine AS builder
 
+# Prisma a besoin des dépendances système OpenSSL sous Alpine
+RUN apk add --no-cache openssl
+
 # Définition du répertoire de travail
 WORKDIR /usr/src/app
 
@@ -19,6 +22,8 @@ RUN npm run build
 
 # Etape finale : exécution
 FROM node:20-alpine
+
+RUN apk add --no-cache openssl
 
 WORKDIR /usr/src/app
 
