@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  edusphere-backend:
+    build: .
+    container_name: edusphere-backend-prod
+    restart: always
+    ports:
+      # Modifiez "3000" à gauche vers un port externe libre sur votre VPS si le 3000 est déjà pris,
+      # ex: "3005:3000"
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    # Charge toutes les variables d'environnement depuis le fichier .env
+    env_file:
+      - .env
+    # Définit un réseau pour que potentiellement Nginx sur le VPS puisse utiliser le nom du service
+    networks:
+      - edusphere-network
+
+networks:
+  edusphere-network:
+    driver: bridge
