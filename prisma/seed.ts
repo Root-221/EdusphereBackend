@@ -104,12 +104,19 @@ async function clearTenantData(client: any) {
 }
 
 async function main() {
+  console.log('Verification initiale...');
+  const existingAdmin = await prisma.user.findFirst({ where: { role: UserRole.SUPER_ADMIN } });
+  if (existingAdmin) {
+    console.log('Un super admin existe deja. Le seeding ne sera pas execute pour eviter d ecraser la base de donnees de production.');
+    return;
+  }
+
   console.log('Seeding database...');
   const passwordHash = await bcrypt.hash(TEMP_PASSWORD, 10);
 
-  await prisma.session.deleteMany();
-  await prisma.user.deleteMany();
-  await prisma.school.deleteMany();
+  // SUPPRIME EN PROD : await prisma.session.deleteMany();
+  // SUPPRIME EN PROD : await prisma.user.deleteMany();
+  // SUPPRIME EN PROD : await prisma.school.deleteMany();
 
   await prisma.user.create({
     data: {
@@ -163,7 +170,7 @@ async function main() {
 
   try {
     await tenant.$connect();
-    await clearTenantData(tenant);
+    // SUPPRIME EN PROD : await clearTenantData(tenant);
 
     const schoolAdminEmail = 'admin@lycee-excellence.sn';
     await tenant.user.create({
