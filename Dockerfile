@@ -1,4 +1,4 @@
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 # Définition du répertoire de travail
 WORKDIR /usr/src/app
@@ -18,7 +18,7 @@ RUN npm run db:generate
 RUN npm run build
 
 # Etape finale : exécution
-FROM node:18-alpine
+FROM node:20-alpine
 
 WORKDIR /usr/src/app
 
