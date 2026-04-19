@@ -13,9 +13,9 @@ RUN npm install
 # Copie du reste des fichiers
 COPY . .
 
-# Génération du build NestJS et du client Prisma
-RUN npm run build
+# Génération du client Prisma PUIS compilation NestJS
 RUN npm run db:generate
+RUN npm run build
 
 # Etape finale : exécution
 FROM node:18-alpine
